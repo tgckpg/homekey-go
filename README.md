@@ -172,22 +172,7 @@ repeated requests, reconnect after server restart, and unpair/revocation.
 That client is a development test tool only and is not shipped or required.
 It does not emulate Apple's Wallet issuance service.
 
-## Dependencies and local patches
-
-`third_party/hap` contains `github.com/brutella/hap v0.0.35` at commit
-`bc03ca629d44dd58570c2979843f9f677818e31c`, with three focused changes recorded
-in `patches/hap.patch`:
-
-1. Opt-in stateless command characteristics: process repeated requests and
-   never retain the incoming key-bearing TLV as a characteristic value.
-2. Reject missing timed-write context instead of dereferencing nil.
-3. Flush the complete unpair response before closing the controller connection.
-
-The local `replace` in `go.mod` is intentional. **Keep `third_party/hap` with
-the project**; switching directly to the upstream module drops these fixes.
-Application tests plus selected HAP regression tests are run by `make test`.
-The upstream full test suite has an unrelated existing `TestConfigHash`
-service-ID reuse failure; this project does not claim it passes that suite.
+## Reference
 
 Protocol sources:
 - https://github.com/kormax/apple-home-key-reader (commit 96754078121cfe1792a1e2c402873d105c8016e3)
