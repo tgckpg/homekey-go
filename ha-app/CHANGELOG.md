@@ -1,3 +1,8 @@
+## 0.0.2
+
+- Optional direct BlueZ BLE PING/PONG probe with reconnect and matching sequence numbers.
+- Enable host D-Bus access and add BLE reader/adapter options.
+
 # Changelog
 
 ## 0.0.1

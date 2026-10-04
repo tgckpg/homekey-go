@@ -122,3 +122,73 @@ This packages the existing provisioning service unchanged. The HAP listener
 supports Apple Home pairing and Home Key provisioning; lock toggles are still
 simulated. No reader API, MQTT connection, Home Assistant entity integration,
 or ESP32/PN532 authentication transport is added by these files.
+
+
+# Initial BLE PING/PONG transport
+
+Copy the files under `homekey-go/` and `homekey-relay/` into their corresponding
+repositories. This bundle contains changed/new files only, plus unified patches.
+Do not replace the whole repositories with these directories.
+
+## ESP32
+
+Build and flash as before:
+
+    cd homekey-relay/esp32
+    idf.py set-target esp32c3
+    idf.py build
+    idf.py -p /dev/cu.usbmodem101 flash monitor
+
+Copy `BLE address AA:BB:CC:DD:EE:FF` from the serial log.
+The reader now continuously advertises a connectable GATT service until connected.
+PN532 polling continues unchanged. The previous non-connectable UID broadcasts
+are replaced; the old HACS UID sensor will no longer receive those events.
+Card events are logged locally; forwarding them is a subsequent step.
+
+## Go / HA app
+
+Publish the rebuilt image as `ghcr.io/tgckpg/homekey-go:0.0.2` and update the app,
+or use `sh scripts/stage-ha-app.sh` for a local build as before.
+The app config enables `host_dbus: true`; no raw USB access is needed.
+Keep the existing HomeKit options and add:
+
+    ble_reader: "AA:BB:CC:DD:EE:FF"
+    ble_adapter: "hci0"
+
+Restart the app. Expected Go log:
+
+    BLE gateway: connected to AA:BB:CC:DD:EE:FF
+    BLE PONG reader=AA:BB:CC:DD:EE:FF seq=1 round_trip=...
+
+Expected ESP32 log:
+
+    BLE gateway connected
+    BLE PING received; PONG ready
+
+Empty `ble_reader` disables the probe. It sends every 10 seconds; failures retry
+in 5 seconds without taking down HAP. The BlueZ adapter must be powered and
+recognized by HA OS. If logs show D-Bus/AppArmor access denied, inspect the host
+denial before changing permissions. This backend does not use ESPHome proxies.
+
+Standalone Linux:
+
+    go run ./cmd/homekey -ble-reader AA:BB:CC:DD:EE:FF -ble-adapter hci0
+
+Optional `-ble-ping-interval 10s`, minimum 1 second.
+
+## Protocol v0
+
+Service UUID: 7a6b0001-5b21-4f36-8e5d-9c3a26d74210
+Read/write characteristic: 7a6b0002-5b21-4f36-8e5d-9c3a26d74210
+Write with response: 8 bytes = ASCII PING + uint32 sequence, big endian.
+Read: 8 bytes = ASCII PONG + matching sequence; empty before first PING.
+All messages fit the default ATT MTU. The ESP32 prepares PONG in the write callback.
+The Go client verifies the sequence and records write-plus-read elapsed time.
+No notifications, pairing, bonding, NFC authentication, or unlocking in this probe.
+Only one gateway should connect to the reader at a time.
+
+## Validation
+
+Go tests, vet, Linux build, and shell syntax checked in the build environment.
+ESP-IDF compilation and end-to-end radio testing require your ESP-IDF toolchain
+and hardware and have not been performed here.

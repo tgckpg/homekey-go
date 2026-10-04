@@ -17,3 +17,9 @@ configuration:
   pin:
     name: Pairing PIN
     description: Leave empty to generate and save a PIN. Otherwise use eight digits.
+  ble_reader:
+    name: BLE reader address
+    description: ESP32 MAC from its serial log. Leave empty to disable the PING probe.
+  ble_adapter:
+    name: Bluetooth adapter
+    description: Local BlueZ adapter, usually hci0.

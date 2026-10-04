@@ -1,5 +1,5 @@
 name: Home Key Go
-version: "0.0.1"
+version: "0.0.2"
 slug: homekey_go
 description: Virtual HomeKit lock and Apple Home Key provisioning service
 url: https://sgit.k8s.astropenguin.net/penguin/homekey-go/
@@ -10,6 +10,7 @@ startup: services
 boot: auto
 init: true
 host_network: true
+host_dbus: true
 backup: cold
 stage: experimental
 image: ghcr.io/tgckpg/homekey-go
@@ -20,6 +21,8 @@ options:
   interface: ""
   finish: silver
   pin: ""
+  ble_reader: ""
+  ble_adapter: hci0
 schema:
   name: str(1,)
   serial: str(1,)
@@ -27,3 +30,5 @@ schema:
   interface: str
   finish: list(silver|black|gold|tan)
   pin: password
+  ble_reader: str?
+  ble_adapter: str?

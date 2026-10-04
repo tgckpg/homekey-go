@@ -26,6 +26,11 @@ if [ -f /data/options.json ]; then
     port=$(jq -r '.port' /data/options.json)
     iface=$(jq -r '.interface' /data/options.json)
     finish=$(jq -r '.finish' /data/options.json)
+    ble_reader=$(jq -r '.ble_reader // ""' /data/options.json)
+    ble_adapter=$(jq -r '.ble_adapter // "hci0"' /data/options.json)
+    if [ -n "$ble_reader" ]; then
+        set -- "$@" -ble-reader "$ble_reader" -ble-adapter "$ble_adapter"
+    fi
     pin=$(jq -r '.pin' /data/options.json)
     set -- "$@" -name "$name" -serial "$serial" -addr ":$port" -finish "$finish"
     if [ -n "$iface" ]; then

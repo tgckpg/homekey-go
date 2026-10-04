@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"homekey.local/provisioner/internal/blegateway"
 	"log"
 	"math/big"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/brutella/hap"
 	"homekey.local/provisioner/internal/hkserver"
@@ -38,7 +40,21 @@ func run() error {
 	iface := flag.String("interface", "", "LAN interface for mDNS; empty selects eligible interfaces")
 	finish := flag.String("finish", "silver", "Wallet artwork: silver, black, gold, tan")
 	status := flag.Bool("status", false, "print credential counts without starting the server")
+	bleReader := flag.String("ble-reader", "", "ESP32 Bluetooth MAC; empty disables BLE probe")
+	bleAdapter := flag.String("ble-adapter", "hci0", "BlueZ adapter name")
+	bleInterval := flag.Duration("ble-ping-interval", 10*time.Second, "BLE PING interval")
 	flag.Parse()
+	if *bleReader != "" {
+		if err := blegateway.ValidateAddress(*bleReader); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(*bleAdapter, "hci") || strings.ContainsAny(*bleAdapter, "/. ") {
+			return fmt.Errorf("invalid BLE adapter")
+		}
+		if *bleInterval < time.Second {
+			return fmt.Errorf("BLE PING interval must be at least 1s")
+		}
+	}
 	if flag.NArg() != 0 {
 		return fmt.Errorf("unexpected positional argument")
 	}
@@ -118,8 +134,18 @@ func run() error {
 	log.Printf("HAP address %s; persistent state %s", *addr, *state)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	var bleDone chan struct{}
+	if *bleReader != "" {
+		bleDone = make(chan struct{})
+		go func() { defer close(bleDone); blegateway.Run(ctx, *bleReader, *bleAdapter, *bleInterval) }()
+	}
 	err = dev.Server.ListenAndServe(ctx)
-	if ctx.Err() != nil || errors.Is(err, http.ErrServerClosed) {
+	stopped := ctx.Err() != nil
+	cancel()
+	if bleDone != nil {
+		<-bleDone
+	}
+	if stopped || errors.Is(err, context.Canceled) || errors.Is(err, http.ErrServerClosed) || err == nil {
 		return nil
 	}
 	return err

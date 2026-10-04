@@ -2,7 +2,10 @@ module homekey.local/provisioner
 
 go 1.23.0
 
-require github.com/brutella/hap v0.0.35
+require (
+	github.com/brutella/hap v0.0.35
+	github.com/godbus/dbus/v5 v5.1.0
+)
 
 require (
 	github.com/brutella/dnssd v1.2.14 // indirect
