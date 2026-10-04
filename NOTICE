@@ -1,0 +1,22 @@
+Home Key provisioning in Go
+
+Home Key provisioning structures and operations are adapted from:
+  kormax/apple-home-key-reader
+  https://github.com/kormax/apple-home-key-reader
+  Commit 96754078121cfe1792a1e2c402873d105c8016e3
+  Apache License 2.0
+
+Upstream credits include kormax (ECP/NFC protocol research), kupa22
+(HAP and NFC protocol analysis), and the project's contributors.
+Additional protocol documentation: https://github.com/kupa22/apple-homekey
+
+Changes: Go implementation of provisioning only; bounded TLV8 parsing;
+validated keys; atomic combined HAP/credential persistence; lifecycle cleanup;
+standalone virtual lock; Go tests and Makefile. NFC authentication is omitted.
+
+The bundled third_party/hap code is from github.com/brutella/hap v0.0.35,
+commit bc03ca629d44dd58570c2979843f9f677818e31c. Original license and source
+notices are retained. Locally modified files carry notices; the changes are
+recorded in patches/hap.patch. Local regression tests are in
+third_party/hap/homekey_patch_test.go. Generator, example and image assets
+not needed for building the library were omitted.
