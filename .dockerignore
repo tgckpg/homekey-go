@@ -1,0 +1,11 @@
+*
+!go.mod
+!go.sum
+!cmd/
+!cmd/**
+!internal/
+!internal/**
+!ha-app/
+!ha-app/run.sh
+!LICENSE
+!NOTICE

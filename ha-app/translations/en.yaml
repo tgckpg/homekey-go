@@ -1,0 +1,19 @@
+configuration:
+  name:
+    name: Accessory name
+    description: Name shown in Apple Home.
+  serial:
+    name: Serial number
+    description: Stable accessory serial. Keep unchanged once paired.
+  port:
+    name: HomeKit port
+    description: TCP listen port on the HA OS host. Must be unused by other services.
+  interface:
+    name: LAN interface
+    description: Host network interface for mDNS. Leave empty for automatic selection.
+  finish:
+    name: Wallet artwork
+    description: Home Key appearance in Apple Wallet.
+  pin:
+    name: Pairing PIN
+    description: Leave empty to generate and save a PIN. Otherwise use eight digits.

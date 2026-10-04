@@ -1,0 +1,29 @@
+name: Home Key Go
+version: "0.0.1"
+slug: homekey_go
+description: Virtual HomeKit lock and Apple Home Key provisioning service
+url: https://sgit.k8s.astropenguin.net/penguin/homekey-go/
+arch:
+  - aarch64
+  - amd64
+startup: services
+boot: auto
+init: true
+host_network: true
+backup: cold
+stage: experimental
+image: ghcr.io/tgckpg/homekey-go
+options:
+  name: Go Home Key
+  serial: GO-HOMEKEY-001
+  port: 51826
+  interface: ""
+  finish: silver
+  pin: ""
+schema:
+  name: str(1,)
+  serial: str(1,)
+  port: port
+  interface: str
+  finish: list(silver|black|gold|tan)
+  pin: password
