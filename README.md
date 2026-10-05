@@ -1,4 +1,4 @@
-# Home Key provisioning in Go
+# Home Key in Go
 
 Basically [kormax/apple-home-key-reader](https://github.com/kormax/apple-home-key-reader) in go.
 
@@ -24,9 +24,10 @@ Use a compatible iPhone with a passcode and Apple Home/iCloud configured.
 If setup creates only a normal lock, check the provisioning log and status
 below; pairing alone does not prove that Wallet provisioned a key.
 
-This accessory simulates locked/unlocked state for the Home app. Changing it
-**does not operate a physical lock**, and the provisioned key cannot yet be
-used at an NFC reader. Those connections are the next development phase.
+This accessory simulates locked/unlocked state for the Home app. A matching
+ESP32/PN532 BLE reader can authenticate an enrolled Home Key and unlock this
+virtual state. Changing it **does not operate a physical lock**. See
+[the NFC guide](ha-app/NFC.md) for deployment and first-tap testing.
 
 ## Linux
 
@@ -141,11 +142,11 @@ REMOVE return Not Supported because their complete wire semantics are not
 established by the reference. Entire issuer removal through HomeKit unpairing
 is implemented. Per-device removal while keeping an issuer paired needs a
 follow-up implementation before this controls a real lock. Active/inactive
-credential state is preserved for later authentication policy.
+credential state is enforced by NFC authentication.
 
-There is no NFC authentication, attestation, ESP32 bridge, physical-lock
-adapter or cloud API in this project. First validate provisioning on the
-phone; then add the ESP32 transport and authentication service.
+NFC STANDARD authentication and the ESP32 BLE APDU bridge are implemented.
+FAST, ECP express wakeup, NFC attestation, a physical-lock adapter and a cloud
+API are not implemented. Unknown/inactive endpoints are rejected.
 
 ## Build and test
 
@@ -180,3 +181,8 @@ Protocol sources:
 - https://github.com/ikalchev/HAP-python (Home Key characteristic metadata)
 
 Apache-2.0; see LICENSE, NOTICE and the retained third-party license.
+
+## NFC authentication
+
+Version 0.0.3 adds BLE APDU relay and Home Key STANDARD authentication for
+already-enrolled devices. See [NFC deployment and testing](ha-app/NFC.md).

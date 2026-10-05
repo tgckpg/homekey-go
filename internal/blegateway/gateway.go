@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Package blegateway implements the initial Linux BlueZ PING/PONG probe.
+// Package blegateway implements the Linux BlueZ NFC APDU relay and PING/PONG probe.
 package blegateway
 
 import (
@@ -60,9 +60,9 @@ func text(p map[string]dbus.Variant, k string) string { v, _ := p[k].Value().(st
 
 // Run reconnects independently of HAP. A Bluetooth failure does not stop
 // HomeKit provisioning. Each attempt gets a fresh system-bus connection.
-func Run(ctx context.Context, address, adapter string, interval time.Duration) {
+func Run(ctx context.Context, address, adapter string, interval time.Duration, handler Handler) {
 	for ctx.Err() == nil {
-		if err := session(ctx, strings.ToUpper(address), adapter, interval); err != nil && ctx.Err() == nil {
+		if err := session(ctx, strings.ToUpper(address), adapter, interval, handler); err != nil && ctx.Err() == nil {
 			log.Printf("BLE gateway: %v; retrying in 5s", err)
 		}
 		if !wait(ctx, 5*time.Second) {
@@ -70,7 +70,7 @@ func Run(ctx context.Context, address, adapter string, interval time.Duration) {
 		}
 	}
 }
-func session(ctx context.Context, address, adapter string, interval time.Duration) error {
+func session(ctx context.Context, address, adapter string, interval time.Duration, handler Handler) error {
 	c, err := dbus.ConnectSystemBus()
 	if err != nil {
 		return fmt.Errorf("system D-Bus: %w", err)
@@ -158,26 +158,89 @@ func session(ctx context.Context, address, adapter string, interval time.Duratio
 			return fmt.Errorf("PING service resolution: %w", resolveCtx.Err())
 		}
 	}
-	log.Printf("BLE gateway: connected to %s", address)
+	o, err := getObjects(ctx, c)
+	if err != nil {
+		return err
+	}
+	var statusPath, apduPath dbus.ObjectPath
+	writeSize := 20 // Works even at the mandatory ATT MTU of 23.
+	for path, ifs := range o {
+		props, ok := ifs["org.bluez.GattCharacteristic1"]
+		if !ok {
+			continue
+		}
+		service, _ := props["Service"].Value().(dbus.ObjectPath)
+		sp := o[service]["org.bluez.GattService1"]
+		owner, _ := sp["Device"].Value().(dbus.ObjectPath)
+		if owner != device || !strings.EqualFold(text(sp, "UUID"), ServiceUUID) {
+			continue
+		}
+		switch strings.ToLower(text(props, "UUID")) {
+		case StatusUUID:
+			statusPath = path
+		case APDUUUID:
+			apduPath = path
+			if mtu, ok := props["MTU"].Value().(uint16); ok && mtu >= 23 {
+				writeSize = int(mtu) - 3
+				if writeSize > 244 {
+					writeSize = 244
+				}
+			}
+		}
+	}
+	if statusPath == "" || apduPath == "" {
+		return fmt.Errorf("NFC relay characteristics missing; flash the matching ESP32 firmware")
+	}
+	log.Printf("BLE gateway: connected to %s; APDU write_size=%d", address, writeSize)
 	ch := c.Object("org.bluez", characteristic)
-	for seq := uint32(1); ctx.Err() == nil; seq++ {
-		pingCtx, pingDone := context.WithTimeout(ctx, 5*time.Second)
-		started := time.Now()
-		err := ch.CallWithContext(pingCtx, "org.bluez.GattCharacteristic1.WriteValue", 0,
-			request(seq), map[string]dbus.Variant{"type": dbus.MakeVariant("request")}).Err
-		var reply []byte
-		if err == nil {
-			err = ch.CallWithContext(pingCtx, "org.bluez.GattCharacteristic1.ReadValue", 0, map[string]dbus.Variant{}).Store(&reply)
+	status := c.Object("org.bluez", statusPath)
+	apdu := c.Object("org.bluez", apduPath)
+	var lastSession uint32
+	seq := uint32(0)
+	nextPing := time.Time{}
+	for ctx.Err() == nil {
+		card, e := readCard(ctx, status)
+		if e != nil {
+			return fmt.Errorf("NFC status: %w", e)
 		}
-		pingDone()
-		if err != nil {
-			return fmt.Errorf("PING %d: %w", seq, err)
+		if card.Session != 0 && card.Session != lastSession {
+			lastSession = card.Session
+			relay := &Relay{characteristic: apdu, session: card.Session, writeSize: writeSize}
+			authCtx, done := context.WithTimeout(ctx, 12*time.Second)
+			if handler != nil {
+				e = handler(authCtx, card, relay)
+			}
+			done()
+			cleanup, finish := context.WithTimeout(context.Background(), 3*time.Second)
+			releaseError := relay.Release(cleanup)
+			finish()
+			if e != nil {
+				log.Printf("NFC authentication rejected reader=%s session=%d: %v", address, card.Session, e)
+			}
+			if releaseError != nil && ctx.Err() == nil {
+				log.Printf("NFC release: %v", releaseError)
+			}
 		}
-		if !validReply(reply, seq) {
-			return fmt.Errorf("PING %d: unexpected reply %x", seq, reply)
+		if !time.Now().Before(nextPing) {
+			seq++
+			pingCtx, pingDone := context.WithTimeout(ctx, 5*time.Second)
+			started := time.Now()
+			err := ch.CallWithContext(pingCtx, "org.bluez.GattCharacteristic1.WriteValue", 0, request(seq), map[string]dbus.Variant{"type": dbus.MakeVariant("request")}).Err
+			var reply []byte
+			if err == nil {
+				err = ch.CallWithContext(pingCtx, "org.bluez.GattCharacteristic1.ReadValue", 0, map[string]dbus.Variant{}).Store(&reply)
+			}
+			pingDone()
+			if err != nil {
+				return fmt.Errorf("PING %d: %w", seq, err)
+			}
+			if !validReply(reply, seq) {
+				return fmt.Errorf("PING %d: unexpected reply", seq)
+			}
+			log.Printf("BLE PONG reader=%s seq=%d round_trip=%s", address, seq, time.Since(started).Round(time.Millisecond))
+			nextPing = time.Now().Add(interval)
 		}
-		log.Printf("BLE PONG reader=%s seq=%d round_trip=%s", address, seq, time.Since(started).Round(time.Millisecond))
-		if !wait(ctx, interval) {
+		if !wait(ctx, 100*time.Millisecond) {
 			return nil
 		}
 	}

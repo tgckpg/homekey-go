@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"homekey.local/provisioner/internal/blegateway"
+	"homekey.local/provisioner/internal/nfcauth"
 	"log"
 	"math/big"
 	"net"
@@ -40,7 +41,7 @@ func run() error {
 	iface := flag.String("interface", "", "LAN interface for mDNS; empty selects eligible interfaces")
 	finish := flag.String("finish", "silver", "Wallet artwork: silver, black, gold, tan")
 	status := flag.Bool("status", false, "print credential counts without starting the server")
-	bleReader := flag.String("ble-reader", "", "ESP32 Bluetooth MAC; empty disables BLE probe")
+	bleReader := flag.String("ble-reader", "", "ESP32 Bluetooth MAC; empty disables NFC gateway")
 	bleAdapter := flag.String("ble-adapter", "hci0", "BlueZ adapter name")
 	bleInterval := flag.Duration("ble-ping-interval", 10*time.Second, "BLE PING interval")
 	flag.Parse()
@@ -130,14 +131,57 @@ func run() error {
 	fmt.Printf("%s — virtual HomeKit lock\n", *name)
 	fmt.Printf("\"Home\" app from Apple > Add Accessory > More Options > %s\n", *name)
 	fmt.Printf("Pairing code: %s-%s\n", p[:4], p[4:])
-	fmt.Println("Provisioning only: NFC reader and physical lock are not connected.")
+	fmt.Println("NFC authentication enabled when a BLE reader is configured; virtual lock only.")
 	log.Printf("HAP address %s; persistent state %s", *addr, *state)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	var bleDone chan struct{}
 	if *bleReader != "" {
 		bleDone = make(chan struct{})
-		go func() { defer close(bleDone); blegateway.Run(ctx, *bleReader, *bleAdapter, *bleInterval) }()
+		go func() {
+			defer close(bleDone)
+			blegateway.Run(ctx, *bleReader, *bleAdapter, *bleInterval, func(authCtx context.Context, card blegateway.Card, relay *blegateway.Relay) (err error) {
+				log.Printf("NFC card reader=%s session=%d uid_len=%d sak=0x%02x", *bleReader, card.Session, len(card.UID), card.SAK)
+				if card.SAK&0x20 == 0 {
+					return fmt.Errorf("card does not support ISO-DEP")
+				}
+				success := false
+				defer func() {
+					// Best-effort failure UX even if the authentication deadline expired.
+					finishCtx, done := context.WithTimeout(ctx, 2*time.Second)
+					defer done()
+					if e := nfcauth.Finish(finishCtx, relay, success); e != nil {
+						log.Printf("NFC control flow: %v", e)
+					}
+				}()
+				credentials := store.AuthenticationCredentials()
+				result, err := nfcauth.Authenticate(authCtx, relay, credentials)
+				if err != nil {
+					return err
+				}
+				if err = store.SaveAuthenticatedKey(credentials, result.IssuerID, result.EndpointID, result.PublicKey, result.PersistentKey); err != nil {
+					return err
+				}
+				if authCtx.Err() != nil {
+					return authCtx.Err()
+				}
+				err = store.WithAuthorization(credentials, result.IssuerID, result.EndpointID, result.PublicKey, func() error {
+					if authCtx.Err() != nil {
+						return authCtx.Err()
+					}
+					if e := dev.Lock.LockTargetState.SetValue(0); e != nil {
+						return e
+					}
+					return dev.Lock.LockCurrentState.SetValue(0)
+				})
+				if err != nil {
+					return err
+				}
+				success = true
+				log.Printf("Home Key authenticated reader=%s session=%d endpoint=%s; virtual lock unlocked", *bleReader, card.Session, result.EndpointID)
+				return nil
+			})
+		}()
 	}
 	err = dev.Server.ListenAndServe(ctx)
 	stopped := ctx.Err() != nil

@@ -10,9 +10,16 @@ Upstream credits include kormax (ECP/NFC protocol research), kupa22
 (HAP and NFC protocol analysis), and the project's contributors.
 Additional protocol documentation: https://github.com/kupa22/apple-homekey
 
-Changes: Go implementation of provisioning only; bounded TLV8 parsing;
+NFC STANDARD authentication and Digital Key secure-response framing adapted from
+  kormax/apple-home-key-reader homekey.py, entity.py, util/digital_key.py
+  Commit 42454594069529d9d945581afc1cdac59fc187c8
+  Apache License 2.0
+
+Changes: Go implementation of provisioning and NFC STANDARD authentication; bounded TLV8 parsing;
 validated keys; atomic combined HAP/credential persistence; lifecycle cleanup;
-standalone virtual lock; Go tests and Makefile. NFC authentication is omitted.
+standalone virtual lock; Go tests and Makefile. NFC transport is a bounded BLE APDU mailbox; response MAC and signature
+verification, active endpoint authorization and revocation checks are included.
+FAST authentication, ECP and NFC attestation exchange are omitted.
 
 The bundled third_party/hap code is from github.com/brutella/hap v0.0.35,
 commit bc03ca629d44dd58570c2979843f9f677818e31c. Original license and source

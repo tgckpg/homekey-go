@@ -30,7 +30,7 @@ cp "$root/ha-app/run.sh" "$dest/ha-app/run.sh"
 sed '/^image:/d' "$root/ha-app/config.yaml" > "$dest/config.yaml"
 
 cp "$root/ha-app/DOCS.md" "$root/ha-app/README.md" \
-    "$root/ha-app/CHANGELOG.md" "$dest/"
+    "$root/ha-app/CHANGELOG.md" "$root/ha-app/NFC.md" "$dest/"
 
 cp -R "$root/ha-app/translations" "$dest/"
 

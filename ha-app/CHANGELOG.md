@@ -1,3 +1,11 @@
+## 0.0.3
+
+- Relay NFC APDUs through the ESP32 BLE reader, keeping the card active.
+- Authenticate enrolled Home Keys using SELECT, AUTH0 and STANDARD AUTH1.
+- Verify response MACs and device signatures before unlocking the virtual lock.
+- Recheck credentials against concurrent HomeKit revocation; save persistent keys.
+- Preserve PING/PONG, PN532 startup wake prefixes and GPIO mapping.
+
 ## 0.0.2
 
 - Optional direct BlueZ BLE PING/PONG probe with reconnect and matching sequence numbers.
