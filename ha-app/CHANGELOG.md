@@ -1,5 +1,5 @@
 ## 0.0.5
-
+- Acknowledge removal of the placeholder returned by GET
 - Supply the provisioned Home group identifier to matching ESP32 firmware over BLE.
 - Refresh ECP configuration after provisioning changes and every reconnect.
 - Enable Home Key ECP polling before NFC activation, including Express Mode routing.
