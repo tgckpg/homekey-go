@@ -10,7 +10,7 @@ RUN CGO_ENABLED=0 go build -mod=readonly -buildvcs=false -trimpath \
     -ldflags='-s -w' -o /out/homekey ./cmd/homekey
 
 FROM debian:bookworm-slim
-ARG BUILD_VERSION=0.0.4
+ARG BUILD_VERSION
 ARG BUILD_ARCH=amd64
 LABEL io.hass.type="app" \
       io.hass.version="${BUILD_VERSION}" \

@@ -1,3 +1,6 @@
+## 0.0.5
+Acknowledge removal of the placeholder returned by GET
+
 ## 0.0.4
 DEBUG added logs
 

@@ -111,6 +111,10 @@ func readerOperation(c *Credentials, op byte, f Fields) ([]byte, error) {
 			return nil, fmt.Errorf("invalid reader key identifier")
 		}
 		if c.ReaderPrivateKey == "" {
+			// Acknowledge removal of the placeholder returned by GET
+			if hex.EncodeToString(f[4]) == keyID(make([]byte, 32)) {
+				return status(Success)
+			}
 			return status(DoesNotExist)
 		}
 		key, _ := hex.DecodeString(c.ReaderPrivateKey)

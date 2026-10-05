@@ -20,9 +20,9 @@ physical actuator integration in this release.
    existing initialization order. NFC runs in its own task with an 8192-byte
    stack; there is no need to edit an existing sdkconfig's main-task stack.
 
-2. Build and publish your usual `homekey-go` image tagged `0.0.4`, then stage
-   the HA app metadata using the existing repository workflow. Update the
-   installed app and restart it. Keep its existing persistent `/data/state`.
+2. Build and publish your usual `homekey-go`, then stage the HA app metadata
+   using the existing repository workflow. Update the installed app and restart
+   it. Keep its existing persistent `/data/state`.
 
 3. Keep the current app configuration:
 
