@@ -1,3 +1,12 @@
+## 0.0.7
+
+- Move configuration into Open Web UI, importing existing HA options once.
+- Discover compatible Home Key Bluetooth readers and local adapters.
+- Select reader devices from populated dropdowns and lock assignments via checkboxes.
+- Generate immutable IDs automatically; give readers editable friendly names.
+- Trim configuration whitespace and normalize Bluetooth addresses.
+- Save atomically, reject conflicting edits, and reload HomeKit/BLE connections.
+
 ## 0.0.6
 
 - Configure lock and reader lists; remove single-lock startup options.

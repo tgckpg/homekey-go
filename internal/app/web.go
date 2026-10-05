@@ -1,16 +1,83 @@
 package app
 
 import (
+	"context"
+	_ "embed"
 	"encoding/json"
+	"errors"
+	"homekey.local/provisioner/internal/blegateway"
+	"io"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // HA ingress authenticates the user. Only its gateway may reach this listener;
 // standalone mode binds to loopback instead.
-func Handler(locks []*Lock, readers []ReaderConfig, ingress bool) http.Handler {
+func Handler(locks []*Lock, readers []ReaderConfig, ingress bool, settings ...*Settings) http.Handler {
 	mux := http.NewServeMux()
+	if len(settings) > 0 && settings[0] != nil {
+		cfg := settings[0]
+		mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
+			c, rev := cfg.Snapshot()
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(struct {
+				Config   Config `json:"config"`
+				Revision string `json:"revision"`
+			}{c, rev})
+		})
+		mux.HandleFunc("POST /api/config", func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-Homekey-Action") != "configuration" {
+				http.Error(w, "missing action header", 403)
+				return
+			}
+			var payload struct {
+				Config   Config `json:"config"`
+				Revision string `json:"revision"`
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, 128*1024)
+			decoder := json.NewDecoder(r.Body)
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&payload); err != nil {
+				http.Error(w, "invalid configuration JSON", 400)
+				return
+			}
+			var extra any
+			if err := decoder.Decode(&extra); err != io.EOF {
+				http.Error(w, "trailing configuration data", 400)
+				return
+			}
+			if err := cfg.Save(payload.Config, payload.Revision); err != nil {
+				code := 400
+				if errors.Is(err, ErrConflict) || errors.Is(err, ErrReloading) {
+					code = 409
+				}
+				http.Error(w, err.Error(), code)
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+			if cfg.Reload != nil {
+				cfg.Reload()
+			}
+		})
+		mux.HandleFunc("GET /api/discovery", func(w http.ResponseWriter, r *http.Request) {
+			ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+			defer cancel()
+			c, _ := cfg.Snapshot()
+			known := make([]string, 0, len(c.Readers))
+			for _, r := range c.Readers {
+				known = append(known, r.Address)
+			}
+			d, err := blegateway.Discover(ctx, known)
+			if err != nil {
+				http.Error(w, err.Error(), 503)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(d)
+		})
+	}
 	mux.HandleFunc("GET /api/locks", func(w http.ResponseWriter, r *http.Request) {
 		statuses := make([]LockStatus, 0, len(locks))
 		for _, l := range locks {
@@ -81,12 +148,5 @@ type ReaderView struct {
 	Warning string `json:"warning,omitempty"`
 }
 
-const page = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Home Key locks</title><style>
-body{font:16px system-ui;margin:24px auto;padding:0 20px;max-width:850px;color:#18222b;background:#f4f6f8}article{background:white;border:1px solid #ccd4dc;border-radius:10px;padding:20px;margin:16px 0}h2{margin-top:0}button{padding:10px 18px;margin-right:10px;cursor:pointer}code{font-size:24px}small{color:#52616e}.error{color:#a21d1d}
-</style></head><body><h1>Home Key locks</h1><p>Add or edit locks and readers in the app's Configuration tab, then restart. Keep each lock ID unchanged after pairing.</p><p>Pair opens a five-minute HomeKit setup window. Add the lock in Apple Home using the displayed code.</p><p id="error" class="error"></p><main id="locks"></main><h2>Readers</h2><div id="readers"></div><script>
-const apiBase=location.pathname+(location.pathname.endsWith("/")?"":"/");
-const el=(tag,text)=>{const n=document.createElement(tag);n.textContent=text;return n};
-async function action(id,type){try{const r=await fetch(apiBase+'api/locks/'+encodeURIComponent(id)+'/'+type,{method:'POST',headers:{'X-Homekey-Action':'pairing'}});if(!r.ok)throw Error(await r.text());await refresh()}catch(e){document.getElementById('error').textContent=e.message}}
-async function refresh(){try{const r=await fetch(apiBase+'api/locks');if(!r.ok)throw Error(await r.text());const data=await r.json();document.getElementById('error').textContent='';const main=document.getElementById('locks');main.replaceChildren();if(!data.locks.length)main.append(el('p','No locks configured. Add a lock in Configuration.'));for(const l of data.locks){const a=el('article','');a.append(el('h2',l.name),el('small','ID: '+l.id+' · HomeKit port: '+l.port),el('p','Readers: '+(l.readers||[]).join(', ')),el('p',l.summary.paired_controllers?'Paired':'Unpaired'));if(l.pin){a.append(el('code',l.pin),el('p','Pairing window ends '+new Date(l.until).toLocaleTimeString()));const b=el('button','Cancel pairing');b.onclick=()=>action(l.id,'cancel');a.append(b)}else if(!l.summary.paired_controllers){const b=el('button','Pair');b.onclick=()=>action(l.id,'pair');a.append(b)}main.append(a)}const readers=document.getElementById('readers');readers.replaceChildren();for(const r of data.readers)readers.append(el('p',r.id+' · '+r.address+' · '+r.adapter+(r.warning?' · '+r.warning:'')));}catch(e){document.getElementById('error').textContent=e.message}}
-refresh();setInterval(refresh,2000);
-</script></body></html>`
+//go:embed page.html
+var page string

@@ -24,8 +24,8 @@ physical actuator integration in this release.
    using the existing repository workflow. Update the installed app and restart
    it. Keep its existing persistent `/data/state`.
 
-3. Configure lock and reader lists as described in [DOCS.md](DOCS.md), then
-   restart. Assign a reader's ID to the desired locks. The app needs host D-Bus,
+3. Discover readers and assign them to locks in Open Web UI as described in
+   [DOCS.md](DOCS.md), then save the configuration. The app needs host D-Bus,
    host networking, and one TCP HomeKit port per lock. Open Web UI for pairing.
 
 4. Hold the phone at the reader with its existing Home Key installed. ECP

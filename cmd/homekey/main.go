@@ -37,10 +37,47 @@ func run() error {
 	if flag.NArg() != 0 {
 		return fmt.Errorf("unexpected positional argument")
 	}
-	c, err := app.Load(*config)
-	if err != nil {
+
+	if err := os.MkdirAll(*state, 0700); err != nil {
 		return err
 	}
+	if err := os.Chmod(*state, 0700); err != nil {
+		return err
+	}
+	if !*status {
+		unlock, err := lockState(filepath.Join(*state, ".lock"))
+		if err != nil {
+			return err
+		}
+		defer unlock()
+	}
+	activeConfig := *config
+	seed := ""
+	if *ingress {
+		activeConfig = filepath.Join(*state, "config.json")
+		seed = *config
+	}
+	processCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	for {
+		settings, err := app.OpenSettings(activeConfig, seed, *status)
+		if err != nil {
+			return err
+		}
+		err = serve(processCtx, *state, *webAddr, *ingress, *status, settings)
+		if !errors.Is(err, errReload) {
+			return err
+		}
+		if processCtx.Err() != nil {
+			return nil
+		}
+	}
+}
+
+var errReload = errors.New("configuration reload")
+
+func serve(processCtx context.Context, state, webAddr string, ingress, status bool, settings *app.Settings) error {
+	c, _ := settings.Snapshot()
 	var ifaces []string
 	if c.Interface != "" {
 		if _, err := net.InterfaceByName(c.Interface); err != nil {
@@ -48,28 +85,15 @@ func run() error {
 		}
 		ifaces = []string{c.Interface}
 	}
-	if err = os.MkdirAll(*state, 0700); err != nil {
-		return err
-	}
-	if err = os.Chmod(*state, 0700); err != nil {
-		return err
-	}
-	if !*status {
-		unlock, e := lockState(filepath.Join(*state, ".lock"))
-		if e != nil {
-			return e
-		}
-		defer unlock()
-	}
 	var locks []*app.Lock
 	summaries := map[string]provision.Summary{}
 	for _, cfg := range c.Locks {
-		dir := filepath.Join(*state, "locks", cfg.ID)
+		dir := filepath.Join(state, "locks", cfg.ID)
 		store, e := provision.Open(dir)
 		if e != nil {
 			return e
 		}
-		if *status {
+		if status {
 			summaries[cfg.ID] = store.Summary()
 			continue
 		}
@@ -83,10 +107,10 @@ func run() error {
 		}
 		locks = append(locks, l)
 	}
-	if *status {
+	if status {
 		return json.NewEncoder(os.Stdout).Encode(summaries)
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, cancel := context.WithCancel(processCtx)
 	defer cancel()
 	var wg sync.WaitGroup
 	failures := make(chan error, len(locks)+1)
@@ -125,7 +149,36 @@ func run() error {
 			})
 		}(r, assigned)
 	}
-	web := &http.Server{Addr: *webAddr, Handler: app.Handler(locks, c.Readers, *ingress), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second}
+	settings.BeforeSave = func(next app.Config) error {
+		if next.Interface != "" {
+			if _, err := net.InterfaceByName(next.Interface); err != nil {
+				return err
+			}
+		}
+		oldPorts := map[int]bool{}
+		for _, l := range c.Locks {
+			oldPorts[l.Port] = true
+		}
+		for _, l := range next.Locks {
+			if !oldPorts[l.Port] {
+				listener, err := net.Listen("tcp", fmt.Sprintf(":%d", l.Port))
+				if err != nil {
+					return fmt.Errorf("HomeKit port %d is unavailable: %w", l.Port, err)
+				}
+				listener.Close()
+			}
+		}
+		return nil
+	}
+	reload := make(chan struct{}, 1)
+	settings.Reload = func() {
+		select {
+		case reload <- struct{}{}:
+		default:
+		}
+		cancel()
+	}
+	web := &http.Server{Addr: webAddr, Handler: app.Handler(locks, c.Readers, ingress, settings), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second}
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -134,7 +187,7 @@ func run() error {
 			cancel()
 		}
 	}()
-	log.Printf("Configured %d locks and %d readers; pairing UI at %s", len(locks), len(c.Readers), *webAddr)
+	log.Printf("Configured %d locks and %d readers; pairing UI at %s", len(locks), len(c.Readers), webAddr)
 	<-ctx.Done()
 	shutdown, done := context.WithTimeout(context.Background(), 5*time.Second)
 	defer done()
@@ -144,6 +197,11 @@ func run() error {
 	case err := <-failures:
 		return err
 	default:
-		return nil
+		select {
+		case <-reload:
+			return errReload
+		default:
+			return nil
+		}
 	}
 }

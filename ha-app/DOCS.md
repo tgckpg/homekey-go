@@ -2,40 +2,54 @@
 
 ## Configuration
 
-Edit the app Configuration tab (YAML mode supports nested lists), save and
-restart. There are no accessory-specific startup flags or persistent PIN option.
+Open **Open Web UI**. HA's static Configuration form has been replaced by the
+Go configuration editor; it cannot populate dynamic Bluetooth choices.
 
-```yaml
-interface: ""
-locks:
-  - id: GO-HOMEKEY-001
-    name: Go Home Key
-    port: 51826
-    finish: silver
-    readers: [porch]
-  - id: back-door
-    name: Back Door
-    port: 51827
-    finish: black
-    readers: [porch]
-readers:
-  - id: porch
-    address: "70:AF:09:16:42:5A"
-    adapter: hci0
-```
+1. Click **Add reader**. Bluetooth discovery lists Home Key readers with their
+   names, addresses, and adapters. Choose a device; its adapter is filled in.
+2. Give the reader a friendly name. Its immutable ID is generated automatically.
+3. Click **Add lock** or **Edit** beside an existing lock. Select its readers
+   using checkboxes; no IDs need to be typed. A lock can use several readers,
+   and a reader can be shared by several locks in the same Home Key group.
+4. Click **Save configuration**. The service saves atomically and briefly
+   restarts its HomeKit/BLE connections. The page reconnects automatically.
+   Existing lock IDs, pairing identities and credentials stay unchanged.
 
-Each lock ID is immutable and supplies its serial. Name, finish, port and
-reader assignments can be edited. Ports must be unique; 8099 is reserved for
-the Web UI. A reader address can appear only once. IDs use letters, digits,
-underscores and hyphens (1–64 characters). Use `readers: []` if no reader is
-available yet. Use `locks: []` for an installation without locks.
+**Scan Bluetooth** refreshes discovery. Only devices advertising the relay
+service, already exposing its GATT service, or previously configured readers
+are listed. Power on the ESP32 reader and local Bluetooth adapter first.
+Discovery does not connect to, pair with, or disconnect devices, and it does
+not change adapter settings. An off adapter is shown as off.
 
-Shared readers connect once and serve all assigned locks. Only locks that
-actively enroll the authenticated Home Key endpoint unlock. The current ESP32
-firmware supports one Home Key ECP group; assigned locks must share that group,
-normally by pairing into the same Apple Home. Different groups reject taps.
-Only one running service should connect to a reader. BlueZ adapter failures
-reconnect independently of HomeKit.
+If discovery is unavailable, **Enter address manually** remains available.
+Adapter choices use detected adapters and existing configured adapters; when
+none are known, the default hci0 is shown explicitly as unverified. Addresses
+and IDs are trimmed before validation, and addresses are normalized to uppercase.
+
+Names can be edited without changing IDs. HomeKit port and Wallet artwork are
+under **HomeKit settings**; the port defaults to the next free configured
+number. Every lock needs a unique port, and 8099 is reserved for the Web UI.
+New ports are checked for conflicts before saving. **Network settings** allows
+LAN interface selection; leave it empty for automatic selection.
+
+Removing a reader removes its draft lock assignments. Removing a lock stops
+serving it after save but leaves its credential state on disk. Changes remain
+in the browser until Save configuration. Concurrent edits from another page
+are rejected rather than overwriting a newer configuration.
+
+## Updating from 0.0.6
+
+The first start imports existing locks, reader IDs, addresses, adapters and
+assignments from `/data/options.json` into `/data/state/config.json`.
+Subsequent starts load that saved configuration; Supervisor options do not
+replace it. Keep all of `/data/state` in backups. Reader names initially use
+existing IDs until renamed in the UI. Pairing state remains in its existing
+`/data/state/locks/<id>` directory.
+
+Fresh installations start empty. Add readers and locks through Open Web UI.
+The current ESP32 firmware advertises one Home Key ECP group; shared readers
+must serve locks in the same group, normally the same Apple Home. Different
+groups reject taps. Only assigned locks with active enrollment unlock.
 
 ## Pairing
 
@@ -51,29 +65,12 @@ window during the same run uses the same code. Codes are never printed to logs
 or persisted. The Web UI is available through authenticated HA ingress only;
 direct LAN access to port 8099 is rejected.
 
-## Upgrading existing single-lock installations
-
-Back up the app. Replace the old `name`, `serial`, `port`, `finish`, `pin`,
-`ble_reader`, and `ble_adapter` options with the new structure. For the first
-upgraded start, configure **exactly one lock**, using the old serial as its
-`id`, old name, old finish, and old port. Define the reader separately and
-assign its ID to this lock. Keep the complete `/data/state` directory.
-
-The old root state is bound to that ID once, preserving HAP identity, pairing
-and Home Key credentials. The obsolete saved PIN is deleted. Add further
-locks after this first upgraded start. New lock state lives under
-`/data/state/locks/<id>`. Keep IDs unchanged and preserve all state in backups.
-
-Removing a lock from configuration stops serving it but preserves its state.
-Adding its ID back restores its identity and credentials. Configuration edits
-require restart. No MQTT, HA integration, or physical actuator is included yet.
-
 ## Local install and release
 
 Run `sh scripts/stage-ha-app.sh`, copy `dist/homekey_go` into `/addons`, refresh
 the HA app store, install and start it. Local staging removes the image field
 so HA builds the included Dockerfile. Repository installations pull the image
-matching the version in `config.yaml`; publish the 0.0.6 image before updating
+matching the version in `config.yaml`; publish the 0.0.7 image before updating
 that metadata in your app repository. Keep the app slug unchanged.
 
 Standalone builds use `make`, copy `config.example.json` to `config.json`, then

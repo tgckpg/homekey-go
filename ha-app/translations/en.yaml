@@ -1,10 +1,1 @@
-configuration:
-  interface:
-    name: LAN interface
-    description: Interface used by every lock for mDNS; leave empty for automatic selection.
-  locks:
-    name: Locks
-    description: Each lock needs an immutable ID, name, unique HomeKit port, artwork finish, and a list of reader IDs. Save and restart after editing.
-  readers:
-    name: NFC readers
-    description: Each reader needs an ID, ESP32 BLE address, and BlueZ adapter (usually hci0). Assign its ID to one or more locks.
+{}

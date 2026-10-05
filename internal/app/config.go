@@ -18,6 +18,7 @@ type LockConfig struct {
 }
 type ReaderConfig struct {
 	ID      string `json:"id"`
+	Name    string `json:"name,omitempty"`
 	Address string `json:"address"`
 	Adapter string `json:"adapter"`
 }
@@ -39,6 +40,7 @@ func Load(path string) (Config, error) {
 	if err = json.Unmarshal(b, &c); err != nil {
 		return c, err
 	}
+	c.Normalize()
 	return c, c.Validate()
 }
 func (c Config) Validate() error {
@@ -89,4 +91,33 @@ func (c Config) Validate() error {
 		ports[l.Port] = true
 	}
 	return nil
+}
+
+func (c *Config) Normalize() {
+	c.Interface = strings.TrimSpace(c.Interface)
+	if c.Locks == nil {
+		c.Locks = []LockConfig{}
+	}
+	if c.Readers == nil {
+		c.Readers = []ReaderConfig{}
+	}
+	for i := range c.Readers {
+		r := &c.Readers[i]
+		r.ID = strings.TrimSpace(r.ID)
+		r.Name = strings.TrimSpace(r.Name)
+		r.Address = strings.ToUpper(strings.TrimSpace(r.Address))
+		r.Adapter = strings.TrimSpace(r.Adapter)
+	}
+	for i := range c.Locks {
+		l := &c.Locks[i]
+		l.ID = strings.TrimSpace(l.ID)
+		l.Name = strings.TrimSpace(l.Name)
+		l.Finish = strings.TrimSpace(l.Finish)
+		if l.Readers == nil {
+			l.Readers = []string{}
+		}
+		for j := range l.Readers {
+			l.Readers[j] = strings.TrimSpace(l.Readers[j])
+		}
+	}
 }

@@ -18,8 +18,15 @@ The code is generated in memory for each service run, never logged or saved,
 and hidden after pairing. Reopening a window during the same run uses the same
 code. Existing pairings use their stored keys and need no setup PIN.
 
-In HA OS, edit the app **Configuration** tab and restart, then use **Open Web UI**
-for pairing. See [HA app instructions](ha-app/DOCS.md).
+In HA OS, use **Open Web UI** for configuration and pairing. Readers and
+adapters are populated by Bluetooth discovery; lock reader assignments use
+checkboxes. Save configuration restarts connections automatically. Existing
+HA options are imported once into `state/config.json`. See [HA app instructions](ha-app/DOCS.md).
+
+The Web UI generates IDs and offers friendly names; no reader ID needs to be
+typed. Manual Bluetooth address entry remains available if discovery fails.
+Whitespace is trimmed before validation. Standalone UI edits save directly to
+the `-config` JSON file.
 
 Every lock has an immutable `id`, editable `name`, unique HomeKit TCP `port`,
 Wallet artwork `finish`, and a list of reader IDs. IDs allow letters, digits,
