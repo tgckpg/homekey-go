@@ -1,153 +1,85 @@
 # Home Key Go on Home Assistant OS
 
-## Local installation (no published image required)
-
-After adding these files to the root of the homekey-go source repository:
-
-```sh
-sh scripts/stage-ha-app.sh
-```
-
-Copy the resulting `dist/homekey_go` directory into HA OS's `/addons` directory,
-using the Samba `addons` share or an SSH app. The result must be
-`/addons/homekey_go/config.yaml`, alongside its Dockerfile and source directories.
-In HA, open Settings > Apps > App store, select Check for updates from the
-three-dot menu, then install Home Key Go under Local apps.
-On older HA versions the UI calls these Add-ons.
-
-Enable Start on boot, start the app, and open Logs. Use the pairing code printed
-by the Go service in Apple Home > Add Accessory > More Options > Go Home Key.
-The container image build downloads Go dependencies, including the patched HAP
-fork specified by go.mod. Internet access is needed during the initial build.
-
 ## Configuration
 
+Edit the app Configuration tab (YAML mode supports nested lists), save and
+restart. There are no accessory-specific startup flags or persistent PIN option.
+
 ```yaml
-name: Go Home Key
-serial: GO-HOMEKEY-001
-port: 51826
 interface: ""
-finish: silver
-pin: ""
+locks:
+  - id: GO-HOMEKEY-001
+    name: Go Home Key
+    port: 51826
+    finish: silver
+    readers: [porch]
+  - id: back-door
+    name: Back Door
+    port: 51827
+    finish: black
+    readers: [porch]
+readers:
+  - id: porch
+    address: "70:AF:09:16:42:5A"
+    adapter: hci0
 ```
 
-- `name`: accessory name shown in Apple Home.
-- `serial`: stable accessory serial; keep it unchanged after pairing.
-- `port`: HAP TCP port on the HA OS host. Change it if 51826 is occupied.
-- `interface`: HA OS LAN interface, e.g. `end0` or `enp3s0`; empty selects
-  eligible interfaces. Use the actual HA host interface name.
-- `finish`: `silver`, `black`, `gold`, or `tan` Wallet artwork.
-- `pin`: empty generates and saves a random PIN, then reuses it on later starts.
-  An explicit PIN must have eight digits (hyphens are accepted by the CLI);
-  prohibited HomeKit PIN patterns are rejected by the service.
+Each lock ID is immutable and supplies its serial. Name, finish, port and
+reader assignments can be edited. Ports must be unique; 8099 is reserved for
+the Web UI. A reader address can appear only once. IDs use letters, digits,
+underscores and hyphens (1–64 characters). Use `readers: []` if no reader is
+available yet. Use `locks: []` for an installation without locks.
 
-Save configuration changes and restart the app.
-The app uses host networking for HomeKit mDNS and binds HAP to `:<port>`.
-Your phone must be able to reach the HA host and receive its mDNS advertisements.
+Shared readers connect once and serve all assigned locks. Only locks that
+actively enroll the authenticated Home Key endpoint unlock. The current ESP32
+firmware supports one Home Key ECP group; assigned locks must share that group,
+normally by pairing into the same Apple Home. Different groups reject taps.
+Only one running service should connect to a reader. BlueZ adapter failures
+reconnect independently of HomeKit.
 
-## Persistent state and moving an existing pairing
+## Pairing
 
-The service is started with `-state /data/state`. HomeKit identity, paired
-controllers, Home Key credentials, and the generated PIN are stored together
-in `/data/state/state.json`. This is the app's persistent data volume, not the
-HA configuration directory. App backups use cold mode so the service is stopped
-while its state is backed up.
+Click **Open Web UI**, then **Pair** beside a lock. Add that named accessory in
+Apple Home → Add Accessory → More Options, using the displayed code.
+A window lasts five minutes. The code disappears after pairing or cancellation;
+expiry and restarting also close setup. Pairing is rejected outside the window.
+An already paired lock cannot open another setup window. To pair afresh, remove
+it in Apple Home first. Existing connections use stored pairing keys.
 
-For a first installation you can pair a fresh accessory. To preserve an existing
-pairing from your Mac, stop the Mac service and the HA app, then copy the entire
-existing state directory into the app's `/data/state` through a method with
-access to that app's data volume. The ordinary `/addons` source folder and HA
-`/config` directory are NOT that volume. Keep the same name, serial, and explicit
-PIN, if one was configured. Run only one instance with that identity.
+The PIN is random for each service run and held only in memory. A repeated
+window during the same run uses the same code. Codes are never printed to logs
+or persisted. The Web UI is available through authenticated HA ingress only;
+direct LAN access to port 8099 is rejected.
 
-Do not delete state or uninstall the app as an update procedure: losing the
-state means losing its pairing identity and credentials. Keep an app backup.
+## Upgrading existing single-lock installations
 
-## Building a container outside HA
+Back up the app. Replace the old `name`, `serial`, `port`, `finish`, `pin`,
+`ble_reader`, and `ble_adapter` options with the new structure. For the first
+upgraded start, configure **exactly one lock**, using the old serial as its
+`id`, old name, old finish, and old port. Define the reader separately and
+assign its ID to this lock. Keep the complete `/data/state` directory.
 
-From the source repository root:
+The old root state is bound to that ID once, preserving HAP identity, pairing
+and Home Key credentials. The obsolete saved PIN is deleted. Add further
+locks after this first upgraded start. New lock state lives under
+`/data/state/locks/<id>`. Keep IDs unchanged and preserve all state in backups.
 
-```sh
-docker build -t homekey-go:0.0.1 .
-```
+Removing a lock from configuration stops serving it but preserves its state.
+Adding its ID back restores its identity and credentials. Configuration edits
+require restart. No MQTT, HA integration, or physical actuator is included yet.
 
-On a Linux Docker host, run it with a persistent volume and host networking:
+## Local install and release
 
-```sh
-docker run --rm --network host -v homekey-state:/data homekey-go:0.0.1
-```
+Run `sh scripts/stage-ha-app.sh`, copy `dist/homekey_go` into `/addons`, refresh
+the HA app store, install and start it. Local staging removes the image field
+so HA builds the included Dockerfile. Repository installations pull the image
+matching the version in `config.yaml`; publish the 0.0.6 image before updating
+that metadata in your app repository. Keep the app slug unchanged.
 
-Without `/data/options.json`, the CLI uses its default accessory settings with
-state fixed to `/data/state`. Explicit container arguments are passed directly
-to the CLI, so include `-state /data/state` when supplying custom arguments:
+Standalone builds use `make`, copy `config.example.json` to `config.json`, then
+run `./bin/homekey -config config.json`. The Web UI defaults to loopback port
+8099. Linux host networking and host D-Bus are needed for container deployment
+with BLE; supply a mounted JSON config and persistent state. With explicit
+container arguments, include `-state /data/state`.
 
-```sh
-docker run --rm --network host -v homekey-state:/data homekey-go:0.0.1 \
-  -state /data/state -name 'Go Home Key' -addr :51827
-```
-
-Docker Desktop on macOS is not equivalent to a Linux HA OS host for LAN mDNS.
-Use HA OS for the actual discovery and pairing test.
-
-## Publishing and repository installation
-
-`ha-app/config.yaml` is set up to pull `ghcr.io/tgckpg/homekey-go:0.0.1`.
-That image has NOT been published by this packaging work. If you use another
-registry/namespace, edit its `image` field. Build and push both supported
-architectures before attempting repository installation:
-
-```sh
-docker login ghcr.io
-docker buildx build --platform linux/amd64,linux/arm64 \
-  --build-arg BUILD_ARCH='aarch64|amd64' \
-  --build-arg BUILD_VERSION=0.0.1 \
-  -t ghcr.io/tgckpg/homekey-go:0.0.1 --push .
-```
-
-Make the package public if HA will pull it without registry credentials.
-Commit the packaging files to a cloneable Git repository, then add its Git URL
-under App store > Repositories. Use the real Git repository endpoint, not the
-static `sgit` HTML tree URL. Supervisor pulls the image using `config.yaml`.
-The root `repository.yaml` declares this repository; `ha-app` contains the app.
-Once the image is published, those metadata files can instead live in your
-separate HA app repository; the root Dockerfile and Go source stay here.
-
-For releases, update the app version in config.yaml and CHANGELOG.md, build and
-publish the matching image tag, then commit the metadata. Preserve the app slug
-and repository identity to keep existing installs on their update path.
-
-## Current functionality
-
-See [NFC.md](NFC.md) for matching firmware, Wallet test steps, expected logs
-and current limitations. Keep the existing HomeKit state and app slug when
-updating.
-
-## BLE gateway configuration
-
-```yaml
-ble_reader: "70:AF:09:16:42:5A"
-ble_adapter: hci0
-```
-
-An empty `ble_reader` disables the gateway. The app uses host D-Bus; the BlueZ
-adapter must be powered and recognized by HA OS. Failures reconnect after
-5 seconds without stopping HAP. Only one gateway should connect to the reader.
-This backend connects directly and does not use ESPHome proxies or HACS.
-
-Standalone Linux:
-
-```sh
-go run ./cmd/homekey -ble-reader 70:AF:09:16:42:5A -ble-adapter hci0
-```
-
-PING/PONG remains on the original read/write characteristic. The optional
-`-ble-ping-interval 10s` flag has a minimum of 1 second. Ping pauses while a
-card's authentication transaction is running. Two additional characteristics
-provide NFC session status and APDU exchange.
-
-## Validation
-
-Go tests with the race detector, vet and a Linux build pass. Firmware UART and
-mailbox host tests pass with AddressSanitizer/UndefinedBehaviorSanitizer.
-ESP-IDF compilation and end-to-end radio testing still require your toolchain
-and hardware; they have not been performed here.
+See [NFC.md](NFC.md) for firmware and phone testing.

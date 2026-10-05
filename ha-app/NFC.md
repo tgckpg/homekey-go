@@ -24,15 +24,9 @@ physical actuator integration in this release.
    using the existing repository workflow. Update the installed app and restart
    it. Keep its existing persistent `/data/state`.
 
-3. Keep the current app configuration:
-
-   ```yaml
-   ble_reader: "70:AF:09:16:42:5A"
-   ble_adapter: hci0
-   ```
-
-   The HA app still needs host D-Bus and host networking. No new port is added.
-   The HACS integration is not involved in this direct Go-to-ESP32 connection.
+3. Configure lock and reader lists as described in [DOCS.md](DOCS.md), then
+   restart. Assign a reader's ID to the desired locks. The app needs host D-Bus,
+   host networking, and one TCP HomeKit port per lock. Open Web UI for pairing.
 
 4. Hold the phone at the reader with its existing Home Key installed. ECP
    should select the key; Express Mode can authenticate without opening Wallet.
@@ -45,10 +39,9 @@ Expected Go milestones:
 ```text
 BLE gateway: connected to ...; APDU write_size=...
 BLE gateway: Home Key ECP configured reader=... enabled=true
-NFC card reader=... session=... uid_len=... sak=0x20
 Home Key SELECT accepted; protocol=2.0
 Home Key AUTH0 key exchange complete
-Home Key authenticated reader=... session=... endpoint=...; virtual lock unlocked
+Home Key authenticated reader=... session=... endpoint=... lock=...; virtual lock unlocked
 ```
 
 An ordinary card can be detected without having the Home Key applet. SELECT

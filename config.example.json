@@ -1,0 +1,19 @@
+{
+  "interface": "",
+  "locks": [
+    {
+      "id": "GO-HOMEKEY-001",
+      "name": "Go Home Key",
+      "port": 51826,
+      "finish": "silver",
+      "readers": ["porch"]
+    }
+  ],
+  "readers": [
+    {
+      "id": "porch",
+      "address": "70:AF:09:16:42:5A",
+      "adapter": "hci0"
+    }
+  ]
+}

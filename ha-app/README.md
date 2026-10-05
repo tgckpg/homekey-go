@@ -1,7 +1,8 @@
 # Home Key Go
 
-Virtual HomeKit lock with Apple Home Key provisioning, packaged for Home Assistant OS.
-See [DOCS.md](DOCS.md) for installation and configuration.
+HomeKit virtual locks with Apple Home Key NFC authentication, packaged for HA OS.
+Configure multiple locks and readers in Configuration; use Open Web UI to pair.
+One reader can serve several locks in the same Home Key group.
 
-This version provisions Home Key credentials and simulates lock state changes.
-It does not yet connect an ESP32/PN532 reader or operate a physical lock.
+See [DOCS.md](DOCS.md) for setup and migration. Physical locks and HA entity
+integration are separate work.

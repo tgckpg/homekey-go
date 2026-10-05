@@ -2,76 +2,53 @@
 
 Basically [kormax/apple-home-key-reader](https://github.com/kormax/apple-home-key-reader) in go.
 
-## Quick start on macOS
+## Configuration and pairing
+
+Build with Go 1.23+ using `make`. Copy [config.example.json](config.example.json)
+to `config.json`, edit the locks/readers, then run:
 
 ```sh
-brew install go
-make
-./bin/homekey -name "Test Lock"
+./bin/homekey -config config.json -state ./state
 ```
 
-Go 1.23 or newer is required. The first build downloads the pinned Go modules.
-The executable prints a generated pairing code, for example `XXXX-XXXX`.
-It saves that code and its accessory identity for later runs.
+Open http://127.0.0.1:8099 and click **Pair** for a lock. In Apple Home use
+**Add Accessory → More Options**, select its name and enter the code. The
+five-minute pairing window closes when paired, canceled, expired, or restarted.
+The code is generated in memory for each service run, never logged or saved,
+and hidden after pairing. Reopening a window during the same run uses the same
+code. Existing pairings use their stored keys and need no setup PIN.
 
-1. Put your iPhone and the computer running this program on the same LAN.
-2. Open **Home → + → Add Accessory → More Options** (wording can vary by iOS).
-3. Select **Penguin Door** and enter the printed pairing code.
-4. Accept the uncertified-accessory prompt if displayed and complete setup.
-5. Look for the Home Key setup/Express Mode flow and the resulting key in Wallet.
+In HA OS, edit the app **Configuration** tab and restart, then use **Open Web UI**
+for pairing. See [HA app instructions](ha-app/DOCS.md).
 
-Use a compatible iPhone with a passcode and Apple Home/iCloud configured.
-If setup creates only a normal lock, check the provisioning log and status
-below; pairing alone does not prove that Wallet provisioned a key.
+Every lock has an immutable `id`, editable `name`, unique HomeKit TCP `port`,
+Wallet artwork `finish`, and a list of reader IDs. IDs allow letters, digits,
+underscores and hyphens (1–64 characters); they also supply stable serials.
+Keep an ID unchanged once paired. Each lock is a standalone HomeKit accessory
+with its own identity, pairing secrets and Home Key credentials.
 
-This accessory simulates locked/unlocked state for the Home app. A matching
-ESP32/PN532 BLE reader can authenticate an enrolled Home Key and unlock this
-virtual state. Changing it **does not operate a physical lock**. See
-[the NFC guide](ha-app/NFC.md) for deployment and first-tap testing.
+Readers have an `id`, ESP32 BLE `address`, and BlueZ `adapter` such as `hci0`.
+One reader can be assigned to several locks, and a lock can use several readers.
+Only assigned locks with an active enrollment for the authenticated endpoint
+unlock. Shared readers currently require a common Home Key group (normally
+locks in the same Apple Home); different groups disable ECP and reject taps.
+This firmware advertises one group. Multi-group firmware support is separate work.
 
-## Linux
-
-Install Go 1.23+ through your usual package manager or the Go distribution:
-
-```sh
-make
-./bin/homekey -name "Penguin Door" -interface eth0
-```
-
-No Avahi daemon is required; the process advertises mDNS itself. For the first
-iPhone test, run directly on a machine on the phone's LAN. Containers and
-Kubernetes need additional multicast/network configuration; a published TCP
-port alone does not provide HomeKit discovery. Linux host networking is a
-possible container setup; host networking on Docker Desktop is not equivalent
-to a native macOS process for discovery.
-
-## Options
+The key artwork may be determined by the first Home Key lock in a Home;
+editing a finish may not change existing Wallet artwork.
 
 ```text
--name       Name in Home (default: Go Home Key)
--serial     Stable serial (default: GO-HOMEKEY-001)
+-config     Lock/reader configuration JSON (default: ./config.json)
 -state      Persistent directory (default: ./state)
--pin        Eight-digit PIN, optionally with hyphens; generated if omitted
--addr       HAP TCP listen address (default: :51826)
--interface  LAN interface for mDNS; empty uses eligible interfaces
--finish     silver, black, gold, or tan (default: silver)
--status     Print credential counts and exit; safe while the server is running
+-web-addr   Pairing UI address (default: 127.0.0.1:8099)
+-ingress    Restrict UI access to the HA ingress gateway
+-status     Print credential counts per configured lock and exit
 ```
 
-The key artwork color may be determined by the first Home Key lock in the
-home, so changing `-finish` later may not change the existing Wallet artwork.
-
-On macOS an explicit interface might be `en0` or `en1`:
-
-```sh
-./bin/homekey -name "Penguin Door" -interface en0 -state ./state
-```
-
-Choose your actual LAN interface. Allow the executable through the firewall:
-TCP 51826 (or the port you select), and local mDNS UDP 5353. Keep this service
-on the LAN; HomeKit protocol traffic should not be put behind an HTTP reverse
-proxy or published as an Internet service. Discovery usually does not cross
-VLANs without an mDNS reflector and suitable routing.
+Accessory-specific CLI flags have been removed. LAN interface selection is
+in the config JSON. HomeKit still needs TCP access to each lock's port and
+local mDNS UDP 5353. On macOS use the native process for discovery; BLE uses
+Linux BlueZ. The virtual states do not operate a physical lock.
 
 ## What successful provisioning looks like
 
@@ -84,13 +61,13 @@ Provisioning exchange complete: reader=true issuers=1 endpoints=1
 You can inspect the current counts without displaying any keys:
 
 ```sh
-./bin/homekey -status -state ./state
+./bin/homekey -config config.json -status -state ./state
 ```
 
 Example:
 
 ```json
-{"paired_controllers":1,"reader_provisioned":true,"issuers":1,"endpoints":1}
+{"front-door":{"paired_controllers":1,"reader_provisioned":true,"issuers":1,"endpoints":1}}
 ```
 
 - `paired_controllers > 0`: HomeKit pairing completed.
@@ -100,7 +77,7 @@ Example:
 
 ## Persistence and lifecycle
 
-`state/state.json` contains **both HAP pairing secrets and Home Key credentials**.
+`state/locks/<id>/state.json` contains **both HAP pairing secrets and Home Key credentials**.
 Keep the whole directory across restarts and back it up securely. Directory
 permissions are 0700 and state files are 0600. Writes use a synced temporary
 file plus atomic rename; directory syncing is best effort. A process lock
@@ -118,12 +95,15 @@ operation without updating live state. Corrupt saved state stops startup
 rather than silently losing the pairing.
 
 No private keys, credential TLVs or endpoint public keys are logged. The
-printed setup PIN is intentionally visible in the startup output. Do not
+setup PIN is only displayed during a pairing window in the Web UI. Do not
 turn on the HAP library's raw debug logging when using real credentials.
 
-To start over, first remove the accessory in Apple Home, stop the process,
-then **move the complete state directory to a backup location** and restart.
-That creates a new accessory identity. Do not delete state merely to restart.
+For upgrades from the single-lock version, first configure exactly one lock
+with its original serial as `id`, its original name, finish, and HAP port.
+The service binds the existing root `state.json` to this ID using a durable
+`legacy-lock-id` marker and keeps using that store. Add more locks after the
+first upgraded start. The old stored setup PIN is removed; identities and
+credentials remain. Do not delete state to upgrade or restart.
 
 ## Implemented protocol surface
 

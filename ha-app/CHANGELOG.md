@@ -1,3 +1,12 @@
+## 0.0.6
+
+- Configure lock and reader lists; remove single-lock startup options.
+- Preserve independent HomeKit identities, pairings and credentials per lock.
+- Share one BLE connection across assigned locks with per-lock authorization.
+- Add HA ingress Web UI with a five-minute HomeKit pairing window.
+- Keep setup codes in memory; hide after pairing and block setup outside a window.
+- Preserve existing single-lock state through a one-time ID binding.
+
 ## 0.0.5
 - Acknowledge removal of the placeholder returned by GET
 - Supply the provisioned Home group identifier to matching ESP32 firmware over BLE.

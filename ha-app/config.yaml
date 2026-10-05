@@ -1,5 +1,5 @@
 name: Home Key Go
-version: "0.0.5"
+version: "0.0.6"
 slug: homekey_go
 description: HomeKit virtual lock with Apple Home Key NFC authentication
 url: https://sgit.k8s.astropenguin.net/penguin/homekey-go/
@@ -14,21 +14,28 @@ host_dbus: true
 backup: cold
 stage: experimental
 image: ghcr.io/tgckpg/homekey-go
+ingress: true
+ingress_port: 8099
+panel_title: Home Key locks
 options:
-  name: Go Home Key
-  serial: GO-HOMEKEY-001
-  port: 51826
   interface: ""
-  finish: silver
-  pin: ""
-  ble_reader: ""
-  ble_adapter: hci0
+  locks:
+    - id: GO-HOMEKEY-001
+      name: Go Home Key
+      port: 51826
+      finish: silver
+      readers: []
+  readers: []
 schema:
-  name: str(1,)
-  serial: str(1,)
-  port: port
   interface: str
-  finish: list(silver|black|gold|tan)
-  pin: password
-  ble_reader: str?
-  ble_adapter: str?
+  locks:
+    - id: str(1,64)
+      name: str(1,)
+      port: port
+      finish: list(silver|black|gold|tan)
+      readers:
+        - str
+  readers:
+    - id: str(1,64)
+      address: str
+      adapter: str

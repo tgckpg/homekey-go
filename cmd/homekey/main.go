@@ -3,27 +3,22 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"homekey.local/provisioner/internal/app"
 	"homekey.local/provisioner/internal/blegateway"
-	"homekey.local/provisioner/internal/nfcauth"
+	"homekey.local/provisioner/internal/provision"
 	"log"
-	"math/big"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
+	"sync"
 	"syscall"
 	"time"
-
-	"github.com/brutella/hap"
-	"homekey.local/provisioner/internal/hkserver"
-	"homekey.local/provisioner/internal/provision"
 )
 
 func main() {
@@ -33,164 +28,122 @@ func main() {
 	}
 }
 func run() error {
-	name := flag.String("name", "Go Home Key", "name shown in Apple Home")
-	serial := flag.String("serial", "GO-HOMEKEY-001", "stable accessory serial number")
-	state := flag.String("state", "./state", "persistent state directory; keep across restarts")
-	pin := flag.String("pin", "", "8-digit pairing PIN (generated and saved if omitted)")
-	addr := flag.String("addr", ":51826", "HAP listen address")
-	iface := flag.String("interface", "", "LAN interface for mDNS; empty selects eligible interfaces")
-	finish := flag.String("finish", "silver", "Wallet artwork: silver, black, gold, tan")
-	status := flag.Bool("status", false, "print credential counts without starting the server")
-	bleReader := flag.String("ble-reader", "", "ESP32 Bluetooth MAC; empty disables NFC gateway")
-	bleAdapter := flag.String("ble-adapter", "hci0", "BlueZ adapter name")
-	bleInterval := flag.Duration("ble-ping-interval", 10*time.Second, "BLE PING interval")
+	state := flag.String("state", "./state", "persistent state directory")
+	config := flag.String("config", "./config.json", "lock and reader configuration JSON")
+	webAddr := flag.String("web-addr", "127.0.0.1:8099", "configuration/pairing web address")
+	ingress := flag.Bool("ingress", false, "restrict Web UI to the HA ingress gateway")
+	status := flag.Bool("status", false, "print credential counts per lock and exit")
 	flag.Parse()
-	if *bleReader != "" {
-		if err := blegateway.ValidateAddress(*bleReader); err != nil {
-			return err
-		}
-		if !strings.HasPrefix(*bleAdapter, "hci") || strings.ContainsAny(*bleAdapter, "/. ") {
-			return fmt.Errorf("invalid BLE adapter")
-		}
-		if *bleInterval < time.Second {
-			return fmt.Errorf("BLE PING interval must be at least 1s")
-		}
-	}
 	if flag.NArg() != 0 {
 		return fmt.Errorf("unexpected positional argument")
 	}
-	if err := os.MkdirAll(*state, 0700); err != nil {
-		return err
-	}
-	if err := os.Chmod(*state, 0700); err != nil {
-		return err
-	}
-	// Atomic state replacement permits a read-only summary while the server runs.
-	if *status {
-		store, err := provision.Open(*state)
-		if err != nil {
-			return err
-		}
-		return json.NewEncoder(os.Stdout).Encode(store.Summary())
-	}
-	unlock, err := lockState(filepath.Join(*state, ".lock"))
+	c, err := app.Load(*config)
 	if err != nil {
 		return err
-	}
-	defer unlock()
-	store, err := provision.Open(*state)
-	if err != nil {
-		return err
-	}
-	if _, _, err := net.SplitHostPort(*addr); err != nil {
-		return fmt.Errorf("invalid -addr: %w", err)
 	}
 	var ifaces []string
-	if *iface != "" {
-		if _, err := net.InterfaceByName(*iface); err != nil {
+	if c.Interface != "" {
+		if _, err := net.InterfaceByName(c.Interface); err != nil {
 			return err
 		}
-		ifaces = []string{*iface}
+		ifaces = []string{c.Interface}
 	}
-	p := strings.ReplaceAll(*pin, "-", "")
-	if p == "" {
-		v, e := store.Get("provisioning-pin")
-		if e == nil {
-			p = string(v)
-		} else if !errors.Is(e, os.ErrNotExist) {
+	if err = os.MkdirAll(*state, 0700); err != nil {
+		return err
+	}
+	if err = os.Chmod(*state, 0700); err != nil {
+		return err
+	}
+	if !*status {
+		unlock, e := lockState(filepath.Join(*state, ".lock"))
+		if e != nil {
 			return e
 		}
+		defer unlock()
 	}
-	if p == "" {
-		for {
-			n, e := rand.Int(rand.Reader, big.NewInt(100000000))
-			if e != nil {
-				return e
-			}
-			p = fmt.Sprintf("%08d", n)
-			if !hap.InvalidPins[p] {
-				break
-			}
+	var locks []*app.Lock
+	summaries := map[string]provision.Summary{}
+	for _, cfg := range c.Locks {
+		dir := filepath.Join(*state, "locks", cfg.ID)
+		store, e := provision.Open(dir)
+		if e != nil {
+			return e
 		}
-	}
-	if len(p) != 8 || hap.InvalidPins[p] {
-		return fmt.Errorf("PIN must be 8 digits and not a prohibited pattern")
-	}
-	for _, r := range p {
-		if r < '0' || r > '9' {
-			return fmt.Errorf("PIN must contain only digits")
+		if *status {
+			summaries[cfg.ID] = store.Summary()
+			continue
 		}
+		// Retire the old persistent setup code; HAP identities and pairings stay.
+		if e = store.Delete("provisioning-pin"); e != nil && !errors.Is(e, os.ErrNotExist) {
+			return e
+		}
+		l, e := app.NewLock(cfg, store, ifaces)
+		if e != nil {
+			return e
+		}
+		locks = append(locks, l)
 	}
-	if err := store.Set("provisioning-pin", []byte(p)); err != nil {
-		return err
+	if *status {
+		return json.NewEncoder(os.Stdout).Encode(summaries)
 	}
-	dev, err := hkserver.New(store, hkserver.Config{Name: *name, Serial: *serial, Finish: *finish, PIN: p, Address: *addr, Interfaces: ifaces})
-	if err != nil {
-		return err
-	}
-	fmt.Printf("%s — virtual HomeKit lock\n", *name)
-	fmt.Printf("\"Home\" app from Apple > Add Accessory > More Options > %s\n", *name)
-	fmt.Printf("Pairing code: %s-%s\n", p[:4], p[4:])
-	fmt.Println("NFC authentication enabled when a BLE reader is configured; virtual lock only.")
-	log.Printf("HAP address %s; persistent state %s", *addr, *state)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	var bleDone chan struct{}
-	if *bleReader != "" {
-		bleDone = make(chan struct{})
-		go func() {
-			defer close(bleDone)
-			blegateway.Run(ctx, *bleReader, *bleAdapter, *bleInterval, func(authCtx context.Context, card blegateway.Card, relay *blegateway.Relay) (err error) {
-				log.Printf("NFC card reader=%s session=%d uid_len=%d sak=0x%02x", *bleReader, card.Session, len(card.UID), card.SAK)
-				if card.SAK&0x20 == 0 {
-					return fmt.Errorf("card does not support ISO-DEP")
-				}
-				success := false
-				defer func() {
-					// Best-effort failure UX even if the authentication deadline expired.
-					finishCtx, done := context.WithTimeout(ctx, 2*time.Second)
-					defer done()
-					if e := nfcauth.Finish(finishCtx, relay, success); e != nil {
-						log.Printf("NFC control flow: %v", e)
-					}
-				}()
-				credentials := store.AuthenticationCredentials()
-				result, err := nfcauth.Authenticate(authCtx, relay, credentials)
-				if err != nil {
-					return err
-				}
-				if err = store.SaveAuthenticatedKey(credentials, result.IssuerID, result.EndpointID, result.PublicKey, result.PersistentKey); err != nil {
-					return err
-				}
-				if authCtx.Err() != nil {
-					return authCtx.Err()
-				}
-				err = store.WithAuthorization(credentials, result.IssuerID, result.EndpointID, result.PublicKey, func() error {
-					if authCtx.Err() != nil {
-						return authCtx.Err()
-					}
-					if e := dev.Lock.LockTargetState.SetValue(0); e != nil {
-						return e
-					}
-					return dev.Lock.LockCurrentState.SetValue(0)
-				})
-				if err != nil {
-					return err
-				}
-				success = true
-				log.Printf("Home Key authenticated reader=%s session=%d endpoint=%s; virtual lock unlocked", *bleReader, card.Session, result.EndpointID)
-				return nil
-			}, store.ReaderGroupIdentifier)
-		}()
+	var wg sync.WaitGroup
+	failures := make(chan error, len(locks)+1)
+	for _, l := range locks {
+		wg.Add(1)
+		go func(l *app.Lock) {
+			defer wg.Done()
+			if err := l.Device.Server.ListenAndServe(ctx); err != nil && ctx.Err() == nil {
+				failures <- fmt.Errorf("lock %s: %w", l.Config.ID, err)
+				cancel()
+			}
+		}(l)
 	}
-	err = dev.Server.ListenAndServe(ctx)
-	stopped := ctx.Err() != nil
-	cancel()
-	if bleDone != nil {
-		<-bleDone
+	for _, r := range c.Readers {
+		assigned := app.Assigned(locks, r.ID)
+		if len(assigned) == 0 {
+			continue
+		}
+		wg.Add(1)
+		go func(r app.ReaderConfig, assigned []*app.Lock) {
+			defer wg.Done()
+			lastGroupError := ""
+			blegateway.Run(ctx, r.Address, r.Adapter, 10*time.Second, func(authCtx context.Context, card blegateway.Card, relay *blegateway.Relay) error {
+				return app.Authenticate(authCtx, ctx, assigned, r.ID, card, relay)
+			}, func() []byte {
+				group, err := app.Group(assigned)
+				if err != nil {
+					if lastGroupError != err.Error() {
+						log.Print(err)
+						lastGroupError = err.Error()
+					}
+					return nil
+				}
+				lastGroupError = ""
+				return group
+			})
+		}(r, assigned)
 	}
-	if stopped || errors.Is(err, context.Canceled) || errors.Is(err, http.ErrServerClosed) || err == nil {
+	web := &http.Server{Addr: *webAddr, Handler: app.Handler(locks, c.Readers, *ingress), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := web.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			failures <- err
+			cancel()
+		}
+	}()
+	log.Printf("Configured %d locks and %d readers; pairing UI at %s", len(locks), len(c.Readers), *webAddr)
+	<-ctx.Done()
+	shutdown, done := context.WithTimeout(context.Background(), 5*time.Second)
+	defer done()
+	_ = web.Shutdown(shutdown)
+	wg.Wait()
+	select {
+	case err := <-failures:
+		return err
+	default:
 		return nil
 	}
-	return err
 }
