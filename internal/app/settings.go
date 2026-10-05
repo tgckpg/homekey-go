@@ -23,22 +23,21 @@ type Settings struct {
 	Reload     func()
 }
 
-func OpenSettings(path, seed string, readOnly ...bool) (*Settings, error) {
+func OpenSettings(path string, readOnly ...bool) (*Settings, error) {
 	c, err := Load(path)
-	if errors.Is(err, os.ErrNotExist) && seed != "" {
-		c, err = Load(seed)
-		if err != nil {
-			return nil, err
-		}
+	if errors.Is(err, os.ErrNotExist) {
+		c = Config{}
+		c.Normalize()
+
 		if len(readOnly) == 0 || !readOnly[0] {
-			if err = writeConfig(path, c); err != nil {
+			if err := writeConfig(path, c); err != nil {
 				return nil, err
 			}
 		}
-	}
-	if err != nil {
+	} else if err != nil {
 		return nil, err
 	}
+
 	return &Settings{path: path, config: c}, nil
 }
 func revision(c Config) string {

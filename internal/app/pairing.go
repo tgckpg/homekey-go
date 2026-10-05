@@ -97,7 +97,8 @@ func (l *Lock) Status() LockStatus {
 	defer l.pairing.Unlock()
 	s := LockStatus{LockConfig: l.Config, Summary: l.Store.Summary()}
 	if s.Summary.PairedControllers == 0 && time.Now().Before(l.until) {
-		s.PIN = l.pin[:3] + "-" + l.pin[3:5] + "-" + l.pin[5:]
+		// Follow the format shown in home app XXXX-XXXX
+		s.PIN = l.pin[:4] + "-" + l.pin[4:]
 		s.Until = l.until
 	}
 	return s

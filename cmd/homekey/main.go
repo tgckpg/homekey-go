@@ -52,18 +52,21 @@ func run() error {
 		defer unlock()
 	}
 	activeConfig := *config
-	seed := ""
 	if *ingress {
 		activeConfig = filepath.Join(*state, "config.json")
-		seed = *config
 	}
-	processCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+
+	processCtx, stop := signal.NotifyContext(
+		context.Background(), os.Interrupt, syscall.SIGTERM,
+	)
 	defer stop()
+
 	for {
-		settings, err := app.OpenSettings(activeConfig, seed, *status)
+		settings, err := app.OpenSettings(activeConfig, *status)
 		if err != nil {
 			return err
 		}
+
 		err = serve(processCtx, *state, *webAddr, *ingress, *status, settings)
 		if !errors.Is(err, errReload) {
 			return err

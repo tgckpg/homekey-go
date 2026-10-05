@@ -51,6 +51,9 @@ push:
 		-t $(IMAGE_NAME):$(IMAGE_TAG) \
 		--push .
 
+image-info:
+	docker buildx imagetools inspect $(IMAGE_NAME):$(IMAGE_TAG)
+
 clean:
 	rm -rf bin
 
