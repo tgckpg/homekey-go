@@ -1,4 +1,4 @@
-# NFC STANDARD authentication (0.0.3)
+# NFC STANDARD authentication
 
 This release connects the HomeKit provisioning store to the ESP32 reader. Go
 runs SELECT, AUTH0 and STANDARD AUTH1; the ESP32 keeps the PN532 target active
@@ -20,7 +20,7 @@ physical actuator integration in this release.
    existing initialization order. NFC runs in its own task with an 8192-byte
    stack; there is no need to edit an existing sdkconfig's main-task stack.
 
-2. Build and publish your usual `homekey-go` image tagged `0.0.3`, then stage
+2. Build and publish your usual `homekey-go` image tagged `0.0.4`, then stage
    the HA app metadata using the existing repository workflow. Update the
    installed app and restart it. Keep its existing persistent `/data/state`.
 

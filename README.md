@@ -181,8 +181,3 @@ Protocol sources:
 - https://github.com/ikalchev/HAP-python (Home Key characteristic metadata)
 
 Apache-2.0; see LICENSE, NOTICE and the retained third-party license.
-
-## NFC authentication
-
-Version 0.0.3 adds BLE APDU relay and Home Key STANDARD authentication for
-already-enrolled devices. See [NFC deployment and testing](ha-app/NFC.md).

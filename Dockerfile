@@ -10,13 +10,19 @@ RUN CGO_ENABLED=0 go build -mod=readonly -buildvcs=false -trimpath \
     -ldflags='-s -w' -o /out/homekey ./cmd/homekey
 
 FROM debian:bookworm-slim
-ARG BUILD_VERSION=0.0.3
+ARG BUILD_VERSION=0.0.4
 ARG BUILD_ARCH=amd64
 LABEL io.hass.type="app" \
       io.hass.version="${BUILD_VERSION}" \
       io.hass.arch="${BUILD_ARCH}" \
       org.opencontainers.image.title="homekey-go" \
       org.opencontainers.image.licenses="Apache-2.0"
+
+ARG APT_PROXY
+RUN if [ -n "${APT_PROXY}" ]; then \
+      echo "Acquire::http::Proxy \"http://${APT_PROXY}\";" > /etc/apt/apt.conf.d/01proxy; \
+    fi
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates jq tzdata && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /out/homekey /usr/local/bin/homekey

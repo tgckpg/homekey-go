@@ -118,11 +118,6 @@ and repository identity to keep existing installs on their update path.
 
 ## Current functionality
 
-The HAP listener supports Apple Home pairing and Home Key provisioning.
-Version 0.0.3 adds a direct BlueZ BLE connection to the ESP32/PN532 reader and
-STANDARD NFC authentication for enrolled keys. A verified active key unlocks
-the virtual lock; physical actuator integration is not included.
-
 See [NFC.md](NFC.md) for matching firmware, Wallet test steps, expected logs
 and current limitations. Keep the existing HomeKit state and app slug when
 updating.

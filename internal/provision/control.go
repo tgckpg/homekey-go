@@ -7,6 +7,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"math/big"
 	"time"
 )
@@ -51,6 +52,8 @@ func (s *Store) Handle(raw []byte) (response []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Printf("Provisioning request: op=%d reader=%t endpoint=%t",
+		op, hasReader, hasEndpoint)
 	err = s.update(func(d *Data) error {
 		if hasReader {
 			response, err = readerOperation(&d.HomeKey, op, inner)

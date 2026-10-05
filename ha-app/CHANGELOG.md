@@ -1,3 +1,6 @@
+## 0.0.4
+DEBUG added logs
+
 ## 0.0.3
 
 - Relay NFC APDUs through the ESP32 BLE reader, keeping the card active.
