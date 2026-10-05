@@ -60,9 +60,9 @@ func text(p map[string]dbus.Variant, k string) string { v, _ := p[k].Value().(st
 
 // Run reconnects independently of HAP. A Bluetooth failure does not stop
 // HomeKit provisioning. Each attempt gets a fresh system-bus connection.
-func Run(ctx context.Context, address, adapter string, interval time.Duration, handler Handler) {
+func Run(ctx context.Context, address, adapter string, interval time.Duration, handler Handler, groupProvider func() []byte) {
 	for ctx.Err() == nil {
-		if err := session(ctx, strings.ToUpper(address), adapter, interval, handler); err != nil && ctx.Err() == nil {
+		if err := session(ctx, strings.ToUpper(address), adapter, interval, handler, groupProvider); err != nil && ctx.Err() == nil {
 			log.Printf("BLE gateway: %v; retrying in 5s", err)
 		}
 		if !wait(ctx, 5*time.Second) {
@@ -70,7 +70,7 @@ func Run(ctx context.Context, address, adapter string, interval time.Duration, h
 		}
 	}
 }
-func session(ctx context.Context, address, adapter string, interval time.Duration, handler Handler) error {
+func session(ctx context.Context, address, adapter string, interval time.Duration, handler Handler, groupProvider func() []byte) error {
 	c, err := dbus.ConnectSystemBus()
 	if err != nil {
 		return fmt.Errorf("system D-Bus: %w", err)
@@ -195,6 +195,8 @@ func session(ctx context.Context, address, adapter string, interval time.Duratio
 	ch := c.Object("org.bluez", characteristic)
 	status := c.Object("org.bluez", statusPath)
 	apdu := c.Object("org.bluez", apduPath)
+	var configuredGroup []byte
+	configured := false
 	var lastSession uint32
 	seq := uint32(0)
 	nextPing := time.Time{}
@@ -202,6 +204,26 @@ func session(ctx context.Context, address, adapter string, interval time.Duratio
 		card, e := readCard(ctx, status)
 		if e != nil {
 			return fmt.Errorf("NFC status: %w", e)
+		}
+		// Configure only between sessions; the NFC owner takes a snapshot for
+		// each scan. Every new BLE connection gets a fresh configuration.
+		if card.Session == 0 && groupProvider != nil {
+			group := groupProvider()
+			if !configured || !bytes.Equal(group, configuredGroup) {
+				b, err := ecpConfigPacket(group)
+				if err != nil {
+					return err
+				}
+				configCtx, done := context.WithTimeout(ctx, 3*time.Second)
+				err = (&Relay{characteristic: apdu}).write(configCtx, b)
+				done()
+				if err != nil {
+					return fmt.Errorf("ECP configuration (flash matching firmware): %w", err)
+				}
+				configuredGroup = append([]byte(nil), group...)
+				configured = true
+				log.Printf("BLE gateway: Home Key ECP configured reader=%s enabled=%t", address, len(group) == 8)
+			}
 		}
 		if card.Session != 0 && card.Session != lastSession {
 			lastSession = card.Session

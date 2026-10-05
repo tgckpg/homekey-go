@@ -1,5 +1,5 @@
 name: Home Key Go
-version: "0.0.4"
+version: "0.0.5"
 slug: homekey_go
 description: HomeKit virtual lock with Apple Home Key NFC authentication
 url: https://sgit.k8s.astropenguin.net/penguin/homekey-go/

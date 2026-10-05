@@ -2,6 +2,7 @@ package provision
 
 import (
 	"bytes"
+	"encoding/hex"
 	"testing"
 )
 
@@ -81,5 +82,31 @@ func TestAuthenticationRejectsReaderChangeAndInactive(t *testing.T) {
 				t.Fatal("changed credentials accepted")
 			}
 		})
+	}
+}
+
+func TestReaderGroupIdentifier(t *testing.T) {
+	s, _, _ := paired(t)
+	if s.ReaderGroupIdentifier() != nil {
+		t.Fatal("unprovisioned reader has ECP group")
+	}
+	if _, err := s.Handle(readerAdd()); err != nil {
+		t.Fatal(err)
+	}
+	// Independent SHA256("key-identifier" || scalar=1) vector.
+	want := mustHex("539a3f91ed603fef")
+	group := s.ReaderGroupIdentifier()
+	if !bytes.Equal(group, want) {
+		t.Fatalf("wrong group: %s", hex.EncodeToString(group))
+	}
+	group[0] ^= 1
+	if !bytes.Equal(s.ReaderGroupIdentifier(), want) {
+		t.Fatal("group snapshot aliases store")
+	}
+	if _, err := s.Handle(request(3, 6, TLV(4, want))); err != nil {
+		t.Fatal(err)
+	}
+	if s.ReaderGroupIdentifier() != nil {
+		t.Fatal("removed reader still has ECP group")
 	}
 }

@@ -42,3 +42,28 @@ func TestCardSession(t *testing.T) {
 		t.Fatal("bad UID accepted")
 	}
 }
+
+func TestECPConfiguration(t *testing.T) {
+	group := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	b, err := ecpConfigPacket(group)
+	if err != nil || len(b) != 20 || b[1] != 3 || binary.BigEndian.Uint16(b[10:]) != 8 {
+		t.Fatal("bad ECP packet")
+	}
+	for _, v := range b[2:10] {
+		if v != 0 {
+			t.Fatal("configuration must be session-independent")
+		}
+	}
+	for i, v := range group {
+		if b[12+i] != v {
+			t.Fatal("wrong group")
+		}
+	}
+	b, err = ecpConfigPacket(nil)
+	if err != nil || len(b) != 12 {
+		t.Fatal("bad disable packet")
+	}
+	if _, err = ecpConfigPacket(group[:7]); err == nil {
+		t.Fatal("accepted invalid group")
+	}
+}

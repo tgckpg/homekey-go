@@ -180,7 +180,7 @@ func run() error {
 				success = true
 				log.Printf("Home Key authenticated reader=%s session=%d endpoint=%s; virtual lock unlocked", *bleReader, card.Session, result.EndpointID)
 				return nil
-			})
+			}, store.ReaderGroupIdentifier)
 		}()
 	}
 	err = dev.Server.ListenAndServe(ctx)

@@ -20,7 +20,7 @@ physical actuator integration in this release.
    existing initialization order. NFC runs in its own task with an 8192-byte
    stack; there is no need to edit an existing sdkconfig's main-task stack.
 
-2. Build and publish your usual `homekey-go` image tagged `0.0.4`, then stage
+2. Build and publish your usual `homekey-go` image tagged `0.0.5`, then stage
    the HA app metadata using the existing repository workflow. Update the
    installed app and restart it. Keep its existing persistent `/data/state`.
 
@@ -34,8 +34,9 @@ physical actuator integration in this release.
    The HA app still needs host D-Bus and host networking. No new port is added.
    The HACS integration is not involved in this direct Go-to-ESP32 connection.
 
-4. For the first test, open the already-provisioned Home Key in Apple Wallet
-   and hold the phone at the reader until the exchange finishes. Remove it
+4. Hold the phone at the reader with its existing Home Key installed. ECP
+   should select the key; Express Mode can authenticate without opening Wallet.
+   If Express Mode is disabled, approve the presented Home Key. Remove it
    between attempts. Set the virtual lock to locked first if you want to see
    the successful transition in Home.
 
@@ -43,6 +44,7 @@ Expected Go milestones:
 
 ```text
 BLE gateway: connected to ...; APDU write_size=...
+BLE gateway: Home Key ECP configured reader=... enabled=true
 NFC card reader=... session=... uid_len=... sak=0x20
 Home Key SELECT accepted; protocol=2.0
 Home Key AUTH0 key exchange complete
@@ -72,9 +74,14 @@ or its provisioned keys.
 - PING/PONG remains available; its polling pauses during authentication.
 - No credential payloads, private/session keys or APDU contents in normal logs.
 
-FAST authentication, ECP express-mode wakeup and NFC attestation for previously
-unknown/shared devices are not implemented yet. Use Wallet explicitly for this
-release. The stored persistent key is preparation for FAST; this release still
+Home Key ECP routing is implemented in the matching firmware. It requires both
+updates: Go supplies the public Home group ID, and the ESP32 broadcasts it before
+card activation. No private key is sent over BLE. Firmware waits with RF off
+until configured and clears the configuration on reconnect. Go updates the
+group when provisioning changes. ECP itself does not authenticate a device.
+
+FAST authentication and NFC attestation for previously unknown/shared devices
+are not implemented yet. The stored persistent key is preparation for FAST; this release still
 performs STANDARD on every tap.
 
 The NFC session expires after 15 seconds. Go allows 12 seconds for authentication,

@@ -1,3 +1,10 @@
+## 0.0.5
+
+- Supply the provisioned Home group identifier to matching ESP32 firmware over BLE.
+- Refresh ECP configuration after provisioning changes and every reconnect.
+- Enable Home Key ECP polling before NFC activation, including Express Mode routing.
+- Requires matching homekey-relay ECP firmware; no new app configuration.
+
 ## 0.0.4
 DEBUG added logs
 

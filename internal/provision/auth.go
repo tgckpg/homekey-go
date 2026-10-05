@@ -54,3 +54,17 @@ func (s *Store) WithAuthorization(expected Credentials, iid, eid, pub string, fn
 	}
 	return fn()
 }
+
+// ReaderGroupIdentifier is public ECP routing metadata derived from the
+// provisioned reader key, matching the first half of the NFC reader ID.
+// A nil result disables ECP while the Home has no provisioned reader key.
+func (s *Store) ReaderGroupIdentifier() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	scalar, err := hex.DecodeString(s.data.HomeKey.ReaderPrivateKey)
+	if err != nil || len(scalar) != 32 {
+		return nil
+	}
+	group, _ := hex.DecodeString(keyID(scalar))
+	return group
+}

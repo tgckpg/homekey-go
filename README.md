@@ -145,7 +145,7 @@ follow-up implementation before this controls a real lock. Active/inactive
 credential state is enforced by NFC authentication.
 
 NFC STANDARD authentication and the ESP32 BLE APDU bridge are implemented.
-FAST, ECP express wakeup, NFC attestation, a physical-lock adapter and a cloud
+FAST, NFC attestation, a physical-lock adapter and a cloud
 API are not implemented. Unknown/inactive endpoints are rejected.
 
 ## Build and test
@@ -181,3 +181,11 @@ Protocol sources:
 - https://github.com/ikalchev/HAP-python (Home Key characteristic metadata)
 
 Apache-2.0; see LICENSE, NOTICE and the retained third-party license.
+
+### Home Key ECP
+
+Version 0.0.5 requires the matching Home Key ECP relay firmware. Go supplies the
+public Home group ID over BLE on reconnect and after provisioning changes; the
+ESP32 emits ECP before activating a card so iOS can route NFC to Home Key. The
+phone's Express Mode setting governs whether user approval is required.
+See [NFC deployment instructions](ha-app/NFC.md).

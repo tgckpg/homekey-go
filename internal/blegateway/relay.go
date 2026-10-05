@@ -146,3 +146,10 @@ func readCard(ctx context.Context, ch dbus.BusObject) (Card, error) {
 	}
 	return parseCard(b)
 }
+
+func ecpConfigPacket(group []byte) ([]byte, error) {
+	if len(group) != 0 && len(group) != 8 {
+		return nil, fmt.Errorf("ECP group identifier must be 8 bytes")
+	}
+	return packet(3, 0, 0, 0, len(group), group), nil
+}
