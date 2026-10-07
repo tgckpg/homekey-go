@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"encoding/hex"
+	"github.com/godbus/dbus/v5"
 	"testing"
 )
 
@@ -146,5 +147,33 @@ func TestAdvertisement(t *testing.T) {
 	}
 	if _, ok := Advertisement([]byte{21}); ok {
 		t.Fatal("short advertisement")
+	}
+}
+
+func TestDiscoveryPrefersFreshAddressForSameUUID(t *testing.T) {
+	oldPath := dbus.ObjectPath("/org/bluez/hci0/dev_00_00_00_00_00_01")
+	newPath := dbus.ObjectPath("/org/bluez/hci0/dev_FF_FF_FF_FF_FF_FF")
+	advertisement := append([]byte{21, 0, 1}, unhex("00112233445566778899aabbccddeeff")...)
+	makeProps := func(address string) map[string]dbus.Variant {
+		return map[string]dbus.Variant{
+			"ManufacturerData": dbus.MakeVariant(map[uint16]dbus.Variant{0x055a: dbus.MakeVariant(advertisement)}),
+			"Address":          dbus.MakeVariant(address), "Adapter": dbus.MakeVariant(dbus.ObjectPath("/org/bluez/hci0")),
+		}
+	}
+	o := objects{oldPath: {"org.bluez.Device1": makeProps("00:00:00:00:00:01")}, newPath: {"org.bluez.Device1": makeProps("FF:FF:FF:FF:FF:FF")}}
+	for i := 0; i < 20; i++ {
+		path, target := chooseTarget(o, testTarget, map[dbus.ObjectPath]uint64{newPath: 1})
+		if path != newPath || target.Address != "FF:FF:FF:FF:FF:FF" {
+			t.Fatal("selected stale reboot address", path, target)
+		}
+	}
+	path, _ := chooseTarget(o, testTarget, map[dbus.ObjectPath]uint64{newPath: 1, oldPath: 2})
+	if path != oldPath {
+		t.Fatal("did not use newest advertisement")
+	}
+	wrong := testTarget
+	wrong.Adapter = "hci1"
+	if path, _ := chooseTarget(o, wrong, nil); path != "" {
+		t.Fatal("crossed adapter identities")
 	}
 }

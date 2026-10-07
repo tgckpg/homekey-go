@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 )
@@ -144,7 +145,7 @@ func login(ctx context.Context, l Link, c Credential, update func(State)) (*sess
 	s := &session{link: l, update: update}
 	token, e := s.initial(ctx)
 	if e != nil {
-		return nil, e
+		return nil, fmt.Errorf("wait for Sesame initial token: %w", e)
 	}
 	key, e := c.key()
 	if e != nil {
@@ -265,6 +266,7 @@ func (c *Client) Action(ctx context.Context, name string) error {
 }
 func (c *Client) Run(ctx context.Context) {
 	defer c.set(State{Error: "physical lock stopped", Updated: time.Now()})
+	lastError := ""
 	for ctx.Err() == nil {
 		e := c.runSession(ctx)
 		msg := "physical lock disconnected"
@@ -272,28 +274,34 @@ func (c *Client) Run(ctx context.Context) {
 			msg = e.Error()
 		}
 		c.set(State{Error: msg, Updated: time.Now()})
+		if ctx.Err() == nil && msg != lastError {
+			log.Printf("Sesame %s on %s: %s; retrying in 3s", c.target.UUID, c.target.Adapter, msg)
+			lastError = msg
+		}
 		if pause(ctx, 3*time.Second) != nil {
 			return
 		}
 	}
 }
 func (c *Client) runSession(ctx context.Context) error {
-	connect, cancel := context.WithTimeout(ctx, 20*time.Second)
+	connect, cancel := context.WithTimeout(ctx, 30*time.Second)
 	l, actual, e := c.dial(connect, c.target)
-	if e != nil {
-		cancel()
-		return e
-	}
-	defer l.Close()
-	if !actual.Registered {
-		cancel()
-		return errors.New("Sesame was reset; enroll it again")
-	}
-	s, e := login(connect, l, c.credential, c.set)
 	cancel()
 	if e != nil {
 		return e
 	}
+	defer l.Close()
+	if !actual.Registered {
+		return errors.New("Sesame was reset; enroll it again")
+	}
+	// Discovery/connect must not consume the initial-token/login budget.
+	handshake, done := context.WithTimeout(ctx, 10*time.Second)
+	s, e := login(handshake, l, c.credential, c.set)
+	done()
+	if e != nil {
+		return e
+	}
+	log.Printf("Sesame %s on %s: authenticated connection ready", c.target.UUID, c.target.Adapter)
 	for {
 		select {
 		case <-ctx.Done():

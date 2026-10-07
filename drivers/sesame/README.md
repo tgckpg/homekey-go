@@ -21,7 +21,11 @@ the motor. Cloud-only guest keys are not supported.
 failure. `Action` serializes operations on that connection and waits for the
 lock's result code. Failed/timed-out operations are not replayed after reconnect.
 `State` returns the latest immutable snapshot; pointers in snapshots must not be
-modified by callers. Each reconnect clears state until new publications arrive.
+modified by callers. Each reconnect clears state until new publications arrive. Discovery prefers
+advertisements received in the current scan when BlueZ has cached multiple
+addresses for one UUID. Connection setup and login have separate deadlines;
+errors identify discovery, connection, GATT services, notification subscription
+or initial-token/login waits, and connection failures are logged without keys.
 
 Commands: `lock`, `unlock`, `set-lock`, `set-unlock`, `set-boundary`. Calibration
 captures the current reported position; saving either endpoint preserves the

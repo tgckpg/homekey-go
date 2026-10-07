@@ -158,6 +158,112 @@ func Discover(ctx context.Context) (Discovery, error) {
 	return out, nil
 }
 
+// Choose the most recently advertised identity, rather than an arbitrary
+// cached address. BlueZ can retain several Device1 entries for one Sesame UUID.
+func chooseTarget(o objects, t Target, seen map[dbus.ObjectPath]uint64) (dbus.ObjectPath, Target) {
+	var selected dbus.ObjectPath
+	var found Target
+	for path, ifs := range o {
+		candidate, ok := advertised(ifs["org.bluez.Device1"])
+		if !ok || candidate.UUID != t.UUID || candidate.Adapter != t.Adapter {
+			continue
+		}
+		if selected == "" || seen[path] > seen[selected] || (seen[path] == seen[selected] && string(path) < string(selected)) {
+			selected, found = path, candidate
+		}
+	}
+	return selected, found
+}
+
+// StartDiscovery is reference counted. These signal matches and the scan belong
+// only to this D-Bus client; do not remove BlueZ devices or reset the adapter.
+func findTarget(ctx context.Context, c *dbus.Conn, t Target) (dbus.ObjectPath, Target, error) {
+	adapterPath := dbus.ObjectPath("/org/bluez/" + t.Adapter)
+	signals := make(chan *dbus.Signal, 256)
+	c.Signal(signals)
+	defer c.RemoveSignal(signals)
+	properties := []dbus.MatchOption{dbus.WithMatchSender("org.bluez"), dbus.WithMatchInterface("org.freedesktop.DBus.Properties"), dbus.WithMatchMember("PropertiesChanged"), dbus.WithMatchPathNamespace(adapterPath)}
+	added := []dbus.MatchOption{dbus.WithMatchSender("org.bluez"), dbus.WithMatchInterface("org.freedesktop.DBus.ObjectManager"), dbus.WithMatchMember("InterfacesAdded")}
+	if e := c.AddMatchSignal(properties...); e != nil {
+		return "", Target{}, e
+	}
+	defer c.RemoveMatchSignal(properties...)
+	if e := c.AddMatchSignal(added...); e != nil {
+		return "", Target{}, e
+	}
+	defer c.RemoveMatchSignal(added...)
+	adapter := c.Object("org.bluez", adapterPath)
+	if e := adapter.CallWithContext(ctx, "org.bluez.Adapter1.StartDiscovery", 0).Err; e != nil {
+		return "", Target{}, fmt.Errorf("start Sesame scan on %s: %w", t.Adapter, e)
+	}
+	defer stopScan(adapter)
+	seen := map[dbus.ObjectPath]uint64{}
+	var sequence uint64
+	started := time.Now()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return "", Target{}, fmt.Errorf("discover Sesame %s on %s: %w", t.UUID, t.Adapter, ctx.Err())
+		case sig, ok := <-signals:
+			if !ok {
+				return "", Target{}, errors.New("Bluetooth bus closed during discovery")
+			}
+			if sig == nil || len(sig.Body) < 2 {
+				continue
+			}
+			var path dbus.ObjectPath
+			switch sig.Name {
+			case "org.freedesktop.DBus.Properties.PropertiesChanged":
+				props, ok := sig.Body[1].(map[string]dbus.Variant)
+				if !ok || sig.Body[0] != "org.bluez.Device1" {
+					continue
+				}
+				_, manufacturer := props["ManufacturerData"]
+				_, rssi := props["RSSI"]
+				if !manufacturer && !rssi {
+					continue
+				}
+				path = sig.Path
+			case "org.freedesktop.DBus.ObjectManager.InterfacesAdded":
+				path, _ = sig.Body[0].(dbus.ObjectPath)
+				ifs, ok := sig.Body[1].(map[string]map[string]dbus.Variant)
+				if !ok {
+					continue
+				}
+				if _, ok := ifs["org.bluez.Device1"]; !ok {
+					continue
+				}
+			default:
+				continue
+			}
+			if strings.HasPrefix(string(path), string(adapterPath)+"/") {
+				sequence++
+				seen[path] = sequence
+			}
+		case <-ticker.C:
+			o, e := getObjects(ctx, c)
+			if e != nil {
+				return "", Target{}, fmt.Errorf("read Sesame scan: %w", e)
+			}
+			path, found := chooseTarget(o, t, seen)
+			// Give new advertisements a chance to replace pre-reboot cached entries.
+			// A cache fallback still works when BlueZ suppresses duplicate reports.
+			if path != "" && (seen[path] > 0 || time.Since(started) >= 2*time.Second) {
+				if found.Model != t.Model {
+					return "", Target{}, errors.New("Sesame model changed; scan again")
+				}
+				connected, _ := o[path]["org.bluez.Device1"]["Connected"].Value().(bool)
+				if connected {
+					return "", Target{}, errors.New("Sesame is already connected through this adapter")
+				}
+				return path, found, nil
+			}
+		}
+	}
+}
+
 type bluezLink struct {
 	conn          *dbus.Conn
 	device, write dbus.BusObject
@@ -203,54 +309,21 @@ func DialBlueZ(ctx context.Context, t Target) (Link, Target, error) {
 			c.Close()
 		}
 	}()
-	adapter := c.Object("org.bluez", dbus.ObjectPath("/org/bluez/"+t.Adapter))
-	if e = adapter.CallWithContext(ctx, "org.bluez.Adapter1.StartDiscovery", 0).Err; e != nil {
+	path, found, e := findTarget(ctx, c, t)
+	if e != nil {
 		return nil, Target{}, e
-	}
-	defer stopScan(adapter)
-	var path dbus.ObjectPath
-	var found Target
-	for path == "" {
-		o, e := getObjects(ctx, c)
-		if e != nil {
-			return nil, Target{}, e
-		}
-		for p, ifs := range o {
-			props, ok := ifs["org.bluez.Device1"]
-			if !ok {
-				continue
-			}
-			candidate, ok := advertised(props)
-			if ok && candidate.UUID == t.UUID && candidate.Adapter == t.Adapter {
-				if candidate.Model != t.Model {
-					return nil, Target{}, errors.New("Sesame model changed; scan again")
-				}
-				connected, _ := props["Connected"].Value().(bool)
-				if connected {
-					return nil, Target{}, errors.New("Sesame is already connected through this adapter")
-				}
-				path = p
-				found = candidate
-				break
-			}
-		}
-		if path == "" {
-			if e = pause(ctx, 250*time.Millisecond); e != nil {
-				return nil, Target{}, fmt.Errorf("Sesame discovery: %w", e)
-			}
-		}
 	}
 	device = c.Object("org.bluez", path)
 	owned = true
 	if e = device.CallWithContext(ctx, "org.bluez.Device1.Connect", 0).Err; e != nil {
-		return nil, Target{}, e
+		return nil, Target{}, fmt.Errorf("connect Sesame %s on %s: %w", found.Address, t.Adapter, e)
 	}
 	var writePath, notifyPath dbus.ObjectPath
 	mode := ""
 	for writePath == "" || notifyPath == "" {
 		o, e := getObjects(ctx, c)
 		if e != nil {
-			return nil, Target{}, e
+			return nil, Target{}, fmt.Errorf("discover Sesame GATT services at %s: %w", found.Address, e)
 		}
 		resolved, _ := o[path]["org.bluez.Device1"]["ServicesResolved"].Value().(bool)
 		if resolved {
@@ -284,7 +357,7 @@ func DialBlueZ(ctx context.Context, t Target) (Link, Target, error) {
 		}
 		if writePath == "" || notifyPath == "" {
 			if e = pause(ctx, 100*time.Millisecond); e != nil {
-				return nil, Target{}, e
+				return nil, Target{}, fmt.Errorf("discover Sesame GATT services at %s: %w", found.Address, e)
 			}
 		}
 	}
@@ -346,7 +419,7 @@ func DialBlueZ(ctx context.Context, t Target) (Link, Target, error) {
 	}()
 	if e = c.Object("org.bluez", notifyPath).CallWithContext(ctx, "org.bluez.GattCharacteristic1.StartNotify", 0).Err; e != nil {
 		cancel()
-		return nil, Target{}, e
+		return nil, Target{}, fmt.Errorf("subscribe to Sesame notifications at %s: %w", found.Address, e)
 	}
 	success = true
 	return b, found, nil

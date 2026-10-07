@@ -1,3 +1,8 @@
+## 0.0.8
+
+- Sesame: Prefers fresh advertisements on reconnect
+- Sesame: Better error messages
+
 ## 0.0.7
 
 - Move configuration into Open Web UI, importing existing HA options once.

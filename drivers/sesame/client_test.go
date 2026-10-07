@@ -7,7 +7,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -253,5 +255,67 @@ func TestClientReceivesManualStateAndDoesNotReplay(t *testing.T) {
 	}
 	if len(writes) != 1 || <-writes != 83 {
 		t.Fatal("replayed or missed unlock")
+	}
+}
+
+func TestInitialTokenTimeoutIdentifiesStage(t *testing.T) {
+	f := &fakeLink{packets: make(chan []byte), done: make(chan error)}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	_, e := login(ctx, f, testKey, nil)
+	if !errors.Is(e, context.DeadlineExceeded) || !strings.Contains(e.Error(), "initial token") {
+		t.Fatal("missing stage", e)
+	}
+}
+
+func TestReconnectUsesNewTokenAndResetsCipher(t *testing.T) {
+	var attempts atomic.Int32
+	firstReady := make(chan *fakeLink, 1)
+	dial := func(ctx context.Context, target Target) (Link, Target, error) {
+		n := attempts.Add(1)
+		f := newLink()
+		if n == 1 {
+			firstReady <- f
+		}
+		token := []byte{byte(n), 0x22, 0x33, 0x44}
+		<-f.packets
+		f.emit(1, append([]byte{8, 14}, token...))
+		key, _ := testKey.key()
+		peer, auth, _ := newCipher(key, token)
+		f.write = func(kind byte, b []byte) error {
+			if kind != 1 || !bytes.Equal(b, append([]byte{2}, auth[:4]...)) {
+				return errors.New("reconnect reused login token")
+			}
+			reply, _ := peer.encrypt([]byte{7, 2, 0, 0, 0, 0, 0})
+			f.emit(2, reply)
+			state, _ := peer.encrypt([]byte{8, 81, 0, 0, 0, 128, byte(n), 0, 18})
+			f.emit(2, state)
+			return nil
+		}
+		target.Registered = true
+		return f, target, nil
+	}
+	c := NewClient(testTarget, testKey, dial)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { c.Run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	await := func(position int16) {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			s := c.State()
+			if s.Online && s.Position != nil && *s.Position == position {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatalf("did not authenticate session %d: %+v", position, c.State())
+	}
+	await(1)
+	first := <-firstReady
+	first.done <- errors.New("battery removed")
+	await(2)
+	if attempts.Load() != 2 {
+		t.Fatal("unexpected reconnect attempts", attempts.Load())
 	}
 }
