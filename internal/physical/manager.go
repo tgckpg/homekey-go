@@ -41,15 +41,17 @@ type Enrollment struct {
 	} `json:"key,omitempty"`
 }
 type Manager struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	dir     string
-	dial    sesame.Dialer
-	enroll  sync.Mutex
-	mu      sync.RWMutex
-	records map[string]Record
-	clients map[string]*sesame.Client
-	wg      sync.WaitGroup
+	ctx          context.Context
+	cancel       context.CancelFunc
+	dir          string
+	dial         sesame.Dialer
+	enroll       sync.Mutex
+	mu           sync.RWMutex
+	records      map[string]Record
+	clients      map[string]*sesame.Client
+	clientCancel map[string]context.CancelFunc
+	clientDone   map[string]<-chan struct{}
+	wg           sync.WaitGroup
 }
 
 func Open(ctx context.Context, dir string, dial sesame.Dialer) (*Manager, error) {
@@ -57,7 +59,7 @@ func Open(ctx context.Context, dir string, dial sesame.Dialer) (*Manager, error)
 		dial = sesame.DialBlueZ
 	}
 	life, cancel := context.WithCancel(ctx)
-	m := &Manager{ctx: life, cancel: cancel, dir: dir, dial: dial, records: map[string]Record{}, clients: map[string]*sesame.Client{}}
+	m := &Manager{ctx: life, cancel: cancel, dir: dir, dial: dial, records: map[string]Record{}, clients: map[string]*sesame.Client{}, clientCancel: map[string]context.CancelFunc{}, clientDone: map[string]<-chan struct{}{}}
 	if e := os.MkdirAll(filepath.Join(dir, "physical-lock-keys"), 0700); e != nil {
 		cancel()
 		return nil, e
@@ -82,6 +84,14 @@ func Open(ctx context.Context, dir string, dial sesame.Dialer) (*Manager, error)
 			cancel()
 			return nil, errors.New("invalid physical lock registry")
 		}
+		// A crash before the registry update leaves a staged key removal.
+		// Restore it when the persisted registry still references this lock.
+		if _, err := os.Stat(m.keyPath(id)); errors.Is(err, os.ErrNotExist) {
+			if err = os.Rename(m.keyPath(id)+".removing", m.keyPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				cancel()
+				return nil, err
+			}
+		}
 		c, e := m.readKey(id)
 		if e != nil {
 			cancel()
@@ -89,6 +99,31 @@ func Open(ctx context.Context, dir string, dial sesame.Dialer) (*Manager, error)
 		}
 		keys[id] = c
 		m.records[id] = r
+	}
+	// After a committed removal, a crash may leave only the tombstone.
+	files, err := os.ReadDir(filepath.Join(dir, "physical-lock-keys"))
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".json.removing") {
+			continue
+		}
+		id := strings.TrimSuffix(f.Name(), ".json.removing")
+		if _, ok := m.records[id]; ok {
+			continue
+		}
+		if !strings.HasPrefix(id, "sesame-") {
+			continue
+		}
+		if _, err := sesame.NormalizeUUID(strings.TrimPrefix(id, "sesame-")); err != nil {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, "physical-lock-keys", f.Name())); err != nil {
+			cancel()
+			return nil, err
+		}
 	}
 	for _, r := range records {
 		m.start(r, keys[r.ID])
@@ -152,9 +187,66 @@ func writeJSON(path string, v any) error {
 }
 func (m *Manager) start(r Record, key sesame.Credential) {
 	c := sesame.NewClient(r.Target, key, m.dial)
+	ctx, cancel := context.WithCancel(m.ctx)
+	done := make(chan struct{})
 	m.clients[r.ID] = c
+	m.clientCancel[r.ID] = cancel
+	m.clientDone[r.ID] = done
 	m.wg.Add(1)
-	go func() { defer m.wg.Done(); c.Run(m.ctx) }()
+	go func() { defer m.wg.Done(); defer close(done); c.Run(ctx) }()
+}
+
+var ErrNotFound = errors.New("unknown physical lock")
+
+// Remove forgets local enrollment; it never sends a reset or changes the lock.
+// App configuration must reject removal while a virtual lock references this ID.
+func (m *Manager) Remove(id string) error {
+	m.enroll.Lock()
+	defer m.enroll.Unlock()
+	m.mu.Lock()
+	if _, ok := m.records[id]; !ok {
+		m.mu.Unlock()
+		return ErrNotFound
+	}
+	// Move the credential out of the import/recovery path first. If the registry
+	// update fails, restore it and keep the active controller intact.
+	key := m.keyPath(id)
+	tombstone := key + ".removing"
+	moved := false
+	if e := os.Rename(key, tombstone); e != nil && !errors.Is(e, os.ErrNotExist) {
+		m.mu.Unlock()
+		return fmt.Errorf("remove physical lock key: %w", e)
+	} else if e == nil {
+		moved = true
+	}
+	records := make([]Record, 0, len(m.records)-1)
+	for rid, r := range m.records {
+		if rid != id {
+			records = append(records, r)
+		}
+	}
+	if e := writeJSON(filepath.Join(m.dir, "physical-locks.json"), records); e != nil {
+		var restore error
+		if moved {
+			restore = os.Rename(tombstone, key)
+		}
+		m.mu.Unlock()
+		return errors.Join(e, restore)
+	}
+	cancel, done := m.clientCancel[id], m.clientDone[id]
+	delete(m.records, id)
+	delete(m.clients, id)
+	delete(m.clientCancel, id)
+	delete(m.clientDone, id)
+	cancel()
+	m.mu.Unlock()
+	<-done // Includes transport cleanup; do not leave a reconnect goroutine alive.
+	if moved {
+		if e := os.Remove(tombstone); e != nil {
+			return fmt.Errorf("lock removed, but saved key cleanup failed: %w", e)
+		}
+	}
+	return nil
 }
 func (m *Manager) Close() { m.cancel(); m.enroll.Lock(); defer m.enroll.Unlock(); m.wg.Wait() }
 func (m *Manager) Has(id string) bool {

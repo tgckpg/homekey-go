@@ -73,7 +73,11 @@ The physical registry is `/data/state/physical-locks.json`; private keys are und
 `/data/state/physical-lock-keys/` with restrictive permissions. Back up the entire
 state directory. Keys are excluded from public configuration/status responses.
 If enrollment saved a key but failed to save registry metadata, retry adding the
-same device to recover it. No reset or physical-lock key deletion is exposed.
+same device to recover it. To remove a physical lock, first unassign it from all Home Key locks and save
+configuration, then click **Remove** in Physical locks. Removal stops its BLE
+connection and deletes its local saved key immediately. The Sesame lock is not
+reset and its calibration is unchanged; adding it again requires a usable key
+or resetting and registering the lock again.
 
 ## Updating from 0.0.6
 

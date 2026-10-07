@@ -87,6 +87,28 @@ func (s *Settings) Save(c Config, expected string) error {
 	s.restarting = true
 	return nil
 }
+
+// Serialize removal with configuration saves so an actuator cannot disappear
+// between assignment validation and persistence.
+func (s *Settings) RemovePhysical(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.restarting {
+		return ErrReloading
+	}
+	if s.Physical == nil || !s.Physical.Has(id) {
+		return physical.ErrNotFound
+	}
+	for _, l := range s.config.Locks {
+		for _, assigned := range l.PhysicalLocks {
+			if assigned == id {
+				return fmt.Errorf("physical lock is assigned to %s; unassign it and save configuration before removing it", l.Name)
+			}
+		}
+	}
+	return s.Physical.Remove(id)
+}
+
 func writeConfig(path string, c Config) error {
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {

@@ -21,11 +21,11 @@ const apiBase=location.pathname+(location.pathname.endsWith('/')?'':'/');
 const el=(tag,text,cls)=>{const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n};
 const button=(text,fn)=>{const b=el('button',text);b.type='button';b.onclick=fn;return b};
 let config={locks:[],readers:[],interface:''},revision='',status=[],discovery={adapters:[],readers:[]},dirty=false,restarting=false,scanning=false,editingLock=null,editingReader=null;
-let physicalLocks=[],physicalDiscovery={locks:[],adapters:[],warnings:[]},physicalScanning=false,physicalAdding=false,calibrating=null,calibrationBusy=false;
+let physicalLocks=[],physicalDiscovery={locks:[],adapters:[],warnings:[]},physicalScanning=false,physicalAdding=false,calibrating=null,calibrationBusy=false,physicalRemoving=false;
 const label=r=>r.name||r.id;
 function message(text,error=false){$('message').textContent=text;$('message').className='notice'+(error?' error':'')}
 async function request(path,options={}){const r=await fetch(apiBase+path,options);if(!r.ok)throw Error(await r.text());return r.status===204||r.status===202?null:r.json()}
-function markDirty(){dirty=true;$('save').disabled=false;message('Unsaved changes. Save configuration to apply them.');render()}
+function markDirty(){dirty=true;$('save').disabled=false;message('Unsaved changes. Save configuration to apply them.');render();renderPhysical()}
 function render(){
  const main=$('locks');main.replaceChildren();if(!config.locks.length)main.append(el('p','No locks yet. Add a lock to get started.','empty'));
  for(const l of config.locks){const a=el('article',''),s=status.find(x=>x.id===l.id);a.append(el('h2',l.name),el('small','ID: '+l.id+' · HomeKit port: '+l.port));const names=l.readers.map(id=>{const r=config.readers.find(r=>r.id===id);return r?label(r):id});a.append(el('p','Readers: '+(names.join(', ')||'None assigned')));a.append(el('p','Physical locks: '+((l.physical_locks||[]).map(id=>physicalLocks.find(p=>p.id===id)?.name||id).join(', ')||'None (simulation)')));const paired=!!s?.summary.paired_controllers;a.append(el('span',s?(paired?'Paired':'Unpaired'):'Pending save','badge'));const actions=el('div','','toolbar');actions.append(button('Edit',()=>openLock(l.id)),button('Remove',()=>{config.locks=config.locks.filter(x=>x.id!==l.id);markDirty()}));
@@ -52,7 +52,15 @@ $('save').onclick=async()=>{if(restarting)return;restarting=true;$('save').disab
 
 function renderPhysical(){
  const list=$('physical-locks');list.replaceChildren();if(!physicalLocks.length)list.append(el('p','No physical locks added.','empty'));
- for(const p of physicalLocks){const row=el('div','','reader'),info=el('div',''),state=p.state;info.append(el('strong',p.name),el('p',p.target.model+' · '+p.target.adapter,'muted'));info.append(el('p',physicalState(state),state.online?'muted':'error'));const actions=el('div','','toolbar');actions.append(button('Set positions',()=>openCalibration(p.id)));row.append(info,actions);list.append(row)}
+ for(const p of physicalLocks){const row=el('div','','reader'),info=el('div',''),state=p.state;info.append(el('strong',p.name),el('p',p.target.model+' · '+p.target.adapter,'muted'));info.append(el('p',physicalState(state),state.online?'muted':'error'));const actions=el('div','','toolbar');actions.append(button('Set positions',()=>openCalibration(p.id)));const remove=button('Remove',()=>removePhysical(p));remove.disabled=dirty||restarting||physicalRemoving;actions.append(remove);row.append(info,actions);list.append(row)}
+}
+async function removePhysical(p){
+ if(physicalRemoving||restarting)return;
+ if(dirty){message('Save your configuration changes before removing a physical lock.',true);return}
+ if(!confirm('Remove '+p.name+' from Go? Its saved key will be deleted. Sesame will not be reset. Adding it again requires its key or a reset.'))return;
+ physicalRemoving=true;renderPhysical();
+ try{await request('api/physical-locks/'+encodeURIComponent(p.id),{method:'DELETE',headers:{'X-Homekey-Action':'physical-lock'}});if(calibrating===p.id){$('calibration-dialog').close();calibrating=null}await refresh();message('Physical lock removed.')}
+ catch(e){message(e.message,true)}finally{physicalRemoving=false;renderPhysical()}
 }
 function physicalState(s){if(!s.online)return s.error||'Connecting…';if(s.position===undefined)return 'Connected; waiting for position';if(s.critical)return 'Lock reports a critical condition';if(!s.stopped)return 'Moving · '+s.position+'°';return (s.locked?'Locked':'Unlocked')+' · '+s.position+'°'+(s.battery_critical?' · Low battery':'')}
 function physicalChoices(){const old=$('physical-device').value,available=physicalDiscovery.locks.filter(t=>!physicalLocks.some(p=>p.target.uuid===t.uuid));options($('physical-device'),available.map(t=>({value:t.adapter+'|'+t.uuid,label:t.model+' · '+t.address+' · '+t.adapter+(t.registered?' · Registered':' · Unregistered')})),old);selectPhysical()}

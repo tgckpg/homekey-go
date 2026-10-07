@@ -3,6 +3,7 @@ package physical
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -150,5 +151,100 @@ func TestImportPersistsAndRestoresWithoutPublicSecret(t *testing.T) {
 	defer m.Close()
 	if !m.Has(record.ID) {
 		t.Fatal("import not restored")
+	}
+}
+
+func removalFixture(t *testing.T) (*Manager, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	target := sesame.Target{UUID: "00112233-4455-6677-8899-aabbccddeeff", Model: "sesame_6_pro", Adapter: "hci0", Registered: true}
+	id, _ := identity(target)
+	os.Mkdir(filepath.Join(dir, "physical-lock-keys"), 0700)
+	writeJSON(filepath.Join(dir, "physical-lock-keys", id+".json"), sesame.Credential{Secret: "000102030405060708090a0b0c0d0e0f"})
+	writeJSON(filepath.Join(dir, "physical-locks.json"), []Record{{id, "Door", "sesame", target}})
+	m, e := Open(ctx, dir, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	return m, id, dir
+}
+func TestRemovalDeletesKeyStopsWorkerAndPersists(t *testing.T) {
+	m, id, dir := removalFixture(t)
+	done := m.clientDone[id]
+	if e := m.Remove(id); e != nil {
+		t.Fatal(e)
+	}
+	select {
+	case <-done:
+	default:
+		t.Fatal("worker still running")
+	}
+	if m.Has(id) || len(m.Views()) != 0 {
+		t.Fatal("removed lock remains visible")
+	}
+	for _, p := range []string{m.keyPath(id), m.keyPath(id) + ".removing"} {
+		if _, e := os.Stat(p); !os.IsNotExist(e) {
+			t.Fatal("credential remains", p)
+		}
+	}
+	if e := m.Remove(id); !errors.Is(e, ErrNotFound) {
+		t.Fatal("unknown removal accepted", e)
+	}
+	m.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m, e := Open(ctx, dir, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer m.Close()
+	if m.Has(id) {
+		t.Fatal("lock returned on restart")
+	}
+}
+func TestFailedRemovalRestoresKey(t *testing.T) {
+	m, id, dir := removalFixture(t)
+	defer m.Close()
+	registry := filepath.Join(dir, "physical-locks.json")
+	os.Remove(registry)
+	os.Mkdir(registry, 0700)
+	if e := m.Remove(id); e == nil {
+		t.Fatal("accepted failed registry update")
+	}
+	if !m.Has(id) {
+		t.Fatal("lost active record")
+	}
+	if _, e := m.readKey(id); e != nil {
+		t.Fatal("lost key after failed removal", e)
+	}
+}
+func TestInterruptedRemovalRecoversOnOpen(t *testing.T) {
+	m, id, dir := removalFixture(t)
+	m.Close()
+	key := m.keyPath(id)
+	if e := os.Rename(key, key+".removing"); e != nil {
+		t.Fatal(e)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m, e := Open(ctx, dir, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !m.Has(id) {
+		t.Fatal("precommit removal was not rolled back")
+	}
+	m.Close()
+	os.Rename(key, key+".removing")
+	writeJSON(filepath.Join(dir, "physical-locks.json"), []Record{})
+	m, e = Open(ctx, dir, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer m.Close()
+	if _, e = os.Stat(key + ".removing"); !os.IsNotExist(e) {
+		t.Fatal("committed removal retained key")
 	}
 }

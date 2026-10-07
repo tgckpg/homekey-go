@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -94,6 +95,21 @@ func physicalRoutes(mux *http.ServeMux, cfg *Settings) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(d)
+	})
+	mux.HandleFunc("DELETE /api/physical-locks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Homekey-Action") != "physical-lock" {
+			http.Error(w, "missing action header", 403)
+			return
+		}
+		if e := cfg.RemovePhysical(r.PathValue("id")); e != nil {
+			code := http.StatusConflict
+			if errors.Is(e, physical.ErrNotFound) {
+				code = http.StatusNotFound
+			}
+			http.Error(w, e.Error(), code)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /api/physical-locks", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Homekey-Action") != "physical-lock" {

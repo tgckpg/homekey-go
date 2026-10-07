@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -71,5 +73,64 @@ func TestAggregatePhysicalState(t *testing.T) {
 	states["b"] = good
 	if aggregatePhysical([]string{"b"}, states) != 3 {
 		t.Fatal("moving state must be unknown")
+	}
+}
+
+func TestRemovePhysicalHTTPRejectsAssignmentsAndDeletesKey(t *testing.T) {
+	dir := t.TempDir()
+	target := sesame.Target{UUID: "00112233-4455-6677-8899-aabbccddeeff", Model: "sesame_6_pro", Adapter: "hci0", Registered: true}
+	id := "sesame-" + target.UUID
+	keyDir := filepath.Join(dir, "physical-lock-keys")
+	os.Mkdir(keyDir, 0700)
+	key := filepath.Join(keyDir, id+".json")
+	os.WriteFile(key, []byte(`{"secret":"000102030405060708090a0b0c0d0e0f"}`), 0600)
+	raw, _ := json.Marshal([]physical.Record{{ID: id, Name: "Door", Driver: "sesame", Target: target}})
+	os.WriteFile(filepath.Join(dir, "physical-locks.json"), raw, 0600)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m, e := physical.Open(ctx, dir, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer m.Close()
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := Config{Locks: []LockConfig{{ID: "front", Name: "Front", Port: 51826, Finish: "silver", PhysicalLocks: []string{id}}}}
+	writeConfig(path, cfg)
+	s, e := OpenSettings(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	s.Physical = m
+	send := func(header string) int {
+		r := httptest.NewRequest("DELETE", "/api/physical-locks/"+id, nil)
+		r.Header.Set("X-Homekey-Action", header)
+		w := httptest.NewRecorder()
+		Handler(nil, nil, false, s).ServeHTTP(w, r)
+		return w.Code
+	}
+	if code := send(""); code != 403 {
+		t.Fatal("removal missing action header", code)
+	}
+	if code := send("physical-lock"); code != 409 {
+		t.Fatal("removed assigned lock", code)
+	}
+	if !m.Has(id) {
+		t.Fatal("assigned lock forgotten")
+	}
+	cfg.Locks[0].PhysicalLocks = nil
+	writeConfig(path, cfg)
+	s, e = OpenSettings(path)
+	if e != nil {
+		t.Fatal(e)
+	}
+	s.Physical = m
+	if code := send("physical-lock"); code != 204 {
+		t.Fatal("removal failed", code)
+	}
+	if _, e := os.Stat(key); !os.IsNotExist(e) {
+		t.Fatal("saved key not deleted")
+	}
+	if code := send("physical-lock"); code != 404 {
+		t.Fatal("unknown physical lock removal", code)
 	}
 }

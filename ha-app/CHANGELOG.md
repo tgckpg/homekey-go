@@ -1,3 +1,7 @@
+## 0.0.9
+
+- Fixed missing remove lock button
+
 ## 0.0.8
 
 - Sesame: Prefers fresh advertisements on reconnect
