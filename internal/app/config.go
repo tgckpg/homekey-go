@@ -10,11 +10,12 @@ import (
 )
 
 type LockConfig struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Port    int      `json:"port"`
-	Finish  string   `json:"finish"`
-	Readers []string `json:"readers"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Port          int      `json:"port"`
+	Finish        string   `json:"finish"`
+	Readers       []string `json:"readers"`
+	PhysicalLocks []string `json:"physical_locks,omitempty"`
 }
 type ReaderConfig struct {
 	ID      string `json:"id"`
@@ -80,6 +81,13 @@ func (c Config) Validate() error {
 		default:
 			return fmt.Errorf("invalid lock finish")
 		}
+		physical := map[string]bool{}
+		for _, id := range l.PhysicalLocks {
+			if !identifier.MatchString(id) || physical[id] {
+				return fmt.Errorf("invalid or duplicate physical lock %q", id)
+			}
+			physical[id] = true
+		}
 		seen := map[string]bool{}
 		for _, r := range l.Readers {
 			if !readers[r] || seen[r] {
@@ -115,6 +123,9 @@ func (c *Config) Normalize() {
 		l.Finish = strings.TrimSpace(l.Finish)
 		if l.Readers == nil {
 			l.Readers = []string{}
+		}
+		for j := range l.PhysicalLocks {
+			l.PhysicalLocks[j] = strings.TrimSpace(l.PhysicalLocks[j])
 		}
 		for j := range l.Readers {
 			l.Readers[j] = strings.TrimSpace(l.Readers[j])

@@ -176,3 +176,12 @@ public Home group ID over BLE on reconnect and after provisioning changes; the
 ESP32 emits ECP before activating a card so iOS can route NFC to Home Key. The
 phone's Express Mode setting governs whether user approval is required.
 See [NFC deployment instructions](ha-app/NFC.md).
+
+## Sesame physical locks
+
+The web UI can scan and enroll Sesame 5/5 Pro/6/6 Pro locks, import an existing
+local key, capture lock/unlock positions and the supported boundary, and assign
+physical locks to Home Key locks. See [setup instructions](ha-app/DOCS.md#physical-locks-sesame)
+and [driver notes](drivers/sesame/README.md). Credentials stay in private state;
+`drivers/sesame` owns the protocol and direct BlueZ transport. Real-device
+registration, calibration and radio behavior still require hardware validation.

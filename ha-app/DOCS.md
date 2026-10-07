@@ -37,6 +37,44 @@ serving it after save but leaves its credential state on disk. Changes remain
 in the browser until Save configuration. Concurrent edits from another page
 are rejected rather than overwriting a newer configuration.
 
+## Physical locks (Sesame)
+
+1. In **Physical locks**, click **Add physical lock**. Scan results show supported
+   nearby Sesame locks and their local Bluetooth adapters.
+2. For an unregistered lock, choose **Register an unregistered lock**. This
+   provisions BLE access and saves its key immediately. It does not reset an
+   existing lock or enroll the lock in a Sesame cloud account.
+3. For a lock already configured in the Sesame app, choose **Import an existing
+   key** and paste the SDK key JSON containing `deviceUUID`, `deviceModel`, and
+   `secretKey` (the SDK also exports `keyIndex` and `sesame2PublicKey`). The key must
+   match the selected device and pass a local login. Cloud-only guest keys do
+   not work. This is not a parser for arbitrary Sesame sharing QR codes.
+4. Open **Set positions**. With the door open, turn the thumb-turn to the desired
+   locked position, wait for the displayed position to update, and click
+   **Use current as locked**. Repeat for unlocked. Set the boundary the same way;
+   its button is enabled only when firmware reports support. Changes are saved
+   directly to the lock. Use **Test lock** / **Test unlock** to verify movement.
+5. Edit a Home Key lock and select its **Assigned physical locks**, alongside its
+   assigned readers. Save configuration. Several virtual locks can share one
+   physical lock; a tap dispatches at most one unlock per physical device.
+
+Physical-lock enrollment and calibration take effect immediately. Virtual-lock
+assignments remain drafts until **Save configuration**. No physical assignment
+means simulation mode. Home Key success means the lock accepted the unlock
+command; motor completion is reported separately from real state notifications.
+Offline, moving, critical or conflicting multi-lock states appear as Unknown.
+
+The controller uses direct BlueZ on the local adapter. The server must be in BLE
+range; HA Bluetooth proxies and ESP32 lock tunnelling are not included. Connections
+are kept open for prompt commands and manual state updates; battery impact and
+phone-app coexistence need testing on the actual lock.
+
+The physical registry is `/data/state/physical-locks.json`; private keys are under
+`/data/state/physical-lock-keys/` with restrictive permissions. Back up the entire
+state directory. Keys are excluded from public configuration/status responses.
+If enrollment saved a key but failed to save registry metadata, retry adding the
+same device to recover it. No reset or physical-lock key deletion is exposed.
+
 ## Updating from 0.0.6
 
 The first start imports existing locks, reader IDs, addresses, adapters and

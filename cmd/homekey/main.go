@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"homekey.local/provisioner/internal/app"
 	"homekey.local/provisioner/internal/blegateway"
+	"homekey.local/provisioner/internal/physical"
 	"homekey.local/provisioner/internal/provision"
 	"log"
 	"net"
@@ -115,7 +116,23 @@ func serve(processCtx context.Context, state, webAddr string, ingress, status bo
 	}
 	ctx, cancel := context.WithCancel(processCtx)
 	defer cancel()
+	physicalLocks, err := physical.Open(ctx, state, nil)
+	if err != nil {
+		return err
+	}
+	defer physicalLocks.Close()
+	settings.Physical = physicalLocks
+	for _, l := range locks {
+		for _, id := range l.Config.PhysicalLocks {
+			if !physicalLocks.Has(id) {
+				return fmt.Errorf("unknown physical lock %s assigned to %s", id, l.Config.ID)
+			}
+		}
+	}
 	var wg sync.WaitGroup
+	updatePhysical := app.BindPhysical(locks, physicalLocks)
+	wg.Add(1)
+	go func() { defer wg.Done(); updatePhysical(ctx) }()
 	failures := make(chan error, len(locks)+1)
 	for _, l := range locks {
 		wg.Add(1)

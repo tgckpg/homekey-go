@@ -112,26 +112,63 @@ func Authenticate(ctx, serviceCtx context.Context, locks []*Lock, reader string,
 }
 
 func unlockAuthorized(ctx context.Context, locks []*Lock, snapshots map[*Lock]provision.Credentials, groupKey string, result *nfcauth.Result, reader string, session uint32) int {
+	// Share a result between virtual locks targeting the same actuator in this tap.
+	results := map[string]<-chan error{}
+	completed := map[string]error{}
 	unlocked := 0
 	for _, l := range locks {
 		expected := snapshots[l]
 		if expected.ReaderPrivateKey != groupKey {
 			continue
 		}
+		var physicalIDs []string
 		e := l.Store.WithAuthorization(expected, result.IssuerID, result.EndpointID, result.PublicKey, func() error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if err := l.Device.Lock.LockTargetState.SetValue(0); err != nil {
-				return err
+			if len(l.Config.PhysicalLocks) == 0 {
+				if err := l.Device.Lock.LockTargetState.SetValue(0); err != nil {
+					return err
+				}
+				return l.Device.Lock.LockCurrentState.SetValue(0)
 			}
-			return l.Device.Lock.LockCurrentState.SetValue(0)
+			if l.Physical == nil {
+				return fmt.Errorf("physical lock controller unavailable")
+			}
+			for _, id := range l.Config.PhysicalLocks {
+				physicalIDs = append(physicalIDs, id)
+				if _, ok := results[id]; !ok {
+					results[id] = l.Physical.Dispatch(ctx, []string{id}, false)
+				}
+			}
+			return nil
 		})
 		if e != nil {
 			continue
 		}
+		for _, id := range physicalIDs {
+			err, ok := completed[id]
+			if !ok {
+				select {
+				case err = <-results[id]:
+				case <-ctx.Done():
+					err = ctx.Err()
+				}
+				completed[id] = err
+			}
+			if err != nil {
+				e = err
+			}
+		}
+		if e != nil {
+			log.Printf("Home Key physical unlock failed lock=%s: %v", l.Config.ID, e)
+			continue
+		}
+		if len(physicalIDs) > 0 {
+			_ = l.Device.Lock.LockTargetState.SetValue(0)
+		}
 		unlocked++
-		log.Printf("Home Key authenticated reader=%s session=%d endpoint=%s lock=%s; virtual lock unlocked", reader, session, result.EndpointID, l.Config.ID)
+		log.Printf("Home Key authenticated reader=%s session=%d endpoint=%s lock=%s; unlock accepted", reader, session, result.EndpointID, l.Config.ID)
 	}
 	return unlocked
 }

@@ -6,7 +6,8 @@
       "name": "Go Home Key",
       "port": 51826,
       "finish": "silver",
-      "readers": ["porch"]
+      "readers": ["porch"],
+      "physical_locks": []
     }
   ],
   "readers": [

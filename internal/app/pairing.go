@@ -6,6 +6,7 @@ import (
 	"github.com/brutella/hap"
 	"github.com/go-chi/chi"
 	"homekey.local/provisioner/internal/hkserver"
+	"homekey.local/provisioner/internal/physical"
 	"homekey.local/provisioner/internal/provision"
 	"math/big"
 	"net/http"
@@ -14,12 +15,13 @@ import (
 )
 
 type Lock struct {
-	Config  LockConfig
-	Store   *provision.Store
-	Device  *hkserver.Device
-	pairing sync.Mutex
-	until   time.Time
-	pin     string
+	Physical *physical.Manager
+	Config   LockConfig
+	Store    *provision.Store
+	Device   *hkserver.Device
+	pairing  sync.Mutex
+	until    time.Time
+	pin      string
 }
 
 func NewLock(c LockConfig, store *provision.Store, ifaces []string) (*Lock, error) {

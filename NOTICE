@@ -27,3 +27,11 @@ notices are retained. Locally modified files carry notices; the changes are
 recorded in patches/hap.patch. Local regression tests are in
 third_party/hap/homekey_patch_test.go. Generator, example and image assets
 not needed for building the library were omitted.
+
+Sesame OS3 BLE protocol and registration/calibration behavior adapted from:
+  CANDY HOUSE SesameSDK_Android_with_DemoApp
+  Commit d12f23c25bffd5adf6361abd0db82bb144441875
+  Copyright (c) 2014-2026 CANDY HOUSE
+  MIT License; full notice retained in drivers/sesame/LICENSE.
+Changes: standalone Go implementation with BlueZ transport, bounded framing,
+strict session validation, private credential storage and web setup controls.

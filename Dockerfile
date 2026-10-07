@@ -6,6 +6,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
+COPY drivers ./drivers
 RUN CGO_ENABLED=0 go build -mod=readonly -buildvcs=false -trimpath \
     -ldflags='-s -w' -o /out/homekey ./cmd/homekey
 
@@ -28,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /out/homekey /usr/local/bin/homekey
 COPY ha-app/run.sh /usr/local/bin/homekey-entrypoint
 COPY LICENSE NOTICE /usr/share/doc/homekey-go/
+COPY drivers/sesame/LICENSE /usr/share/doc/homekey-go/sesame-LICENSE
 RUN chmod 0755 /usr/local/bin/homekey-entrypoint
 WORKDIR /data
 ENTRYPOINT ["/usr/local/bin/homekey-entrypoint"]

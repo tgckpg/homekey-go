@@ -20,7 +20,7 @@ mkdir -p "$dest"
 cp "$root/Dockerfile" "$root/.dockerignore" "$root/go.mod" "$root/go.sum" \
     "$root/LICENSE" "$root/NOTICE" "$dest/"
 
-cp -R "$root/cmd" "$root/internal" "$dest/"
+cp -R "$root/cmd" "$root/internal" "$root/drivers" "$dest/"
 
 mkdir -p "$dest/ha-app"
 

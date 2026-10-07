@@ -5,6 +5,8 @@
 !cmd/**
 !internal/
 !internal/**
+!drivers/
+!drivers/**
 !ha-app/
 !ha-app/run.sh
 !LICENSE

@@ -10,19 +10,26 @@ import (
 	"testing"
 )
 
-func TestSettingsImportNormalizeAndConflict(t *testing.T) {
+func TestSettingsNormalizeAndConflict(t *testing.T) {
 	dir := t.TempDir()
 	seed := filepath.Join(dir, "options.json")
 	path := filepath.Join(dir, "config.json")
 	os.WriteFile(seed, []byte(`{"interface":" ","locks":[{"id":"front ","name":"Front ","port":51826,"finish":"silver","readers":["TestReader01 "]}],"readers":[{"id":" TestReader01 ","address":"70:af:09:16:42:5a ","adapter":" hci0 "}]}`), 0600)
-	s, err := OpenSettings(path, seed, true)
+	s, err := OpenSettings(path, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("status imported settings to disk")
 	}
-	s, err = OpenSettings(path, seed)
+	raw, err := os.ReadFile(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err = OpenSettings(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +48,7 @@ func TestSettingsImportNormalizeAndConflict(t *testing.T) {
 		t.Fatal("second save accepted during reload")
 	}
 	os.WriteFile(seed, []byte(`{"locks":[],"readers":[]}`), 0600)
-	reopened, err := OpenSettings(path, seed)
+	reopened, err := OpenSettings(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +64,7 @@ func TestSettingsImportNormalizeAndConflict(t *testing.T) {
 func TestConfigurationHTTPValidation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	writeConfig(path, Config{Locks: []LockConfig{}, Readers: []ReaderConfig{}})
-	s, _ := OpenSettings(path, "")
+	s, _ := OpenSettings(path)
 	calls := 0
 	s.Reload = func() { calls++ }
 	handler := Handler(nil, nil, false, s)

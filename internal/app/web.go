@@ -19,6 +19,7 @@ func Handler(locks []*Lock, readers []ReaderConfig, ingress bool, settings ...*S
 	mux := http.NewServeMux()
 	if len(settings) > 0 && settings[0] != nil {
 		cfg := settings[0]
+		physicalRoutes(mux, cfg)
 		mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
 			c, rev := cfg.Snapshot()
 			w.Header().Set("Content-Type", "application/json")

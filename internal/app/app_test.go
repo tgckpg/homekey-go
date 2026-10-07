@@ -221,6 +221,15 @@ func TestSharedReaderPerLockAuthorization(t *testing.T) {
 	if b.Device.Lock.LockCurrentState.Value() != 1 {
 		t.Fatal("revoked lock unlocked")
 	}
+	a.Config.PhysicalLocks = []string{"sesame-missing"}
+	a.Device.Lock.LockCurrentState.SetValue(1)
+	if n := unlockAuthorized(context.Background(), []*Lock{a}, snapshots, groupKey, result, "porch", 3); n != 0 {
+		t.Fatal("missing actuator controller reported success")
+	}
+	if a.Device.Lock.LockCurrentState.Value() != 1 {
+		t.Fatal("fabricated physical unlock state")
+	}
+	a.Config.PhysicalLocks = nil
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if n := unlockAuthorized(ctx, []*Lock{a}, snapshots, groupKey, result, "porch", 3); n != 0 {

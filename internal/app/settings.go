@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"homekey.local/provisioner/internal/physical"
 	"os"
 	"path/filepath"
 	"sync"
@@ -15,6 +16,7 @@ var ErrConflict = errors.New("configuration changed; reload the page before savi
 var ErrReloading = errors.New("configuration is restarting; retry after the page reconnects")
 
 type Settings struct {
+	Physical   *physical.Manager
 	mu         sync.Mutex
 	path       string
 	config     Config
@@ -65,6 +67,13 @@ func (s *Settings) Save(c Config, expected string) error {
 	c.Normalize()
 	if err := c.Validate(); err != nil {
 		return err
+	}
+	for _, l := range c.Locks {
+		for _, id := range l.PhysicalLocks {
+			if s.Physical == nil || !s.Physical.Has(id) {
+				return fmt.Errorf("unknown physical lock %q", id)
+			}
+		}
 	}
 	if s.BeforeSave != nil {
 		if err := s.BeforeSave(c); err != nil {
