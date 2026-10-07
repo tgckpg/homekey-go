@@ -1,3 +1,7 @@
+## 0.0.10
+
+- Better connection management and error messsages
+
 ## 0.0.9
 
 - Fixed missing remove lock button

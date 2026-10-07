@@ -268,6 +268,45 @@ func TestInitialTokenTimeoutIdentifiesStage(t *testing.T) {
 	}
 }
 
+func TestRegistrationTimeoutIdentifiesStageAndDoesNotRetry(t *testing.T) {
+	for _, stage := range []string{"connect", "initial token", "registration exchange"} {
+		t.Run(stage, func(t *testing.T) {
+			f := newLink()
+			if stage == "initial token" {
+				<-f.packets // No initial notification arrives.
+			}
+			writes := 0
+			f.write = func(byte, []byte) error {
+				writes++ // Registration sent, but no response arrives.
+				return nil
+			}
+			dial := func(ctx context.Context, _ Target) (Link, Target, error) {
+				if stage == "connect" {
+					<-ctx.Done()
+					return nil, Target{}, ctx.Err()
+				}
+				return f, testTarget, nil
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+			defer cancel()
+			e := Register(ctx, testTarget, dial, func(Credential) error {
+				t.Fatal("saved key without registration response")
+				return nil
+			})
+			if !errors.Is(e, context.DeadlineExceeded) || !strings.Contains(e.Error(), stage) {
+				t.Fatal("missing timeout stage", e)
+			}
+			wantWrites := 0
+			if stage == "registration exchange" {
+				wantWrites = 1
+			}
+			if writes != wantWrites {
+				t.Fatalf("registration attempts = %d, want %d", writes, wantWrites)
+			}
+		})
+	}
+}
+
 func TestReconnectUsesNewTokenAndResetsCipher(t *testing.T) {
 	var attempts atomic.Int32
 	firstReady := make(chan *fakeLink, 1)

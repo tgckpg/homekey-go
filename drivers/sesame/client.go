@@ -173,17 +173,22 @@ func login(ctx context.Context, l Link, c Credential, update func(State)) (*sess
 // immediately after deriving the credential, before any additional BLE command.
 // A registered device must instead be imported; this API never resets a lock.
 func Register(ctx context.Context, t Target, dial Dialer, persist func(Credential) error) error {
-	l, actual, e := dial(ctx, t)
+	connect, cancel := context.WithTimeout(ctx, 30*time.Second)
+	l, actual, e := dial(connect, t)
+	cancel()
 	if e != nil {
-		return e
+		return fmt.Errorf("connect for Sesame registration: %w", e)
 	}
 	defer l.Close()
 	if actual.Registered {
 		return errors.New("lock already registered: import its local key instead")
 	}
 	s := &session{link: l}
-	if _, e = s.initial(ctx); e != nil {
-		return e
+	token, done := context.WithTimeout(ctx, 10*time.Second)
+	_, e = s.initial(token)
+	done()
+	if e != nil {
+		return fmt.Errorf("wait for Sesame registration initial token: %w", e)
 	}
 	private, e := ecdh.P256().GenerateKey(rand.Reader)
 	if e != nil {
@@ -193,9 +198,11 @@ func Register(ctx context.Context, t Target, dial Dialer, persist func(Credentia
 	stamp := make([]byte, 4)
 	binary.LittleEndian.PutUint32(stamp, uint32(time.Now().Unix()))
 	payload = append(payload, stamp...)
-	reply, e := s.exchange(ctx, 1, payload, false)
+	registration, finish := context.WithTimeout(ctx, 10*time.Second)
+	reply, e := s.exchange(registration, 1, payload, false)
+	finish()
 	if e != nil {
-		return e
+		return fmt.Errorf("Sesame registration exchange (lock may already be registered): %w", e)
 	}
 	if len(reply) < 77 {
 		return errors.New("invalid registration response; lock may need recovery in the Sesame app")
@@ -208,18 +215,25 @@ func Register(ctx context.Context, t Target, dial Dialer, persist func(Credentia
 	if e != nil {
 		return e
 	}
-	return persist(Credential{Secret: hex.EncodeToString(shared[:16])})
+	if e = persist(Credential{Secret: hex.EncodeToString(shared[:16])}); e != nil {
+		return fmt.Errorf("save Sesame registration key: %w", e)
+	}
+	return nil
 }
 func Probe(ctx context.Context, t Target, c Credential, dial Dialer) error {
-	l, actual, e := dial(ctx, t)
+	connect, cancel := context.WithTimeout(ctx, 30*time.Second)
+	l, actual, e := dial(connect, t)
+	cancel()
 	if e != nil {
-		return e
+		return fmt.Errorf("connect to verify Sesame key: %w", e)
 	}
 	defer l.Close()
 	if !actual.Registered {
 		return errors.New("lock is unregistered; register it first")
 	}
-	_, e = login(ctx, l, c, nil)
+	handshake, done := context.WithTimeout(ctx, 10*time.Second)
+	_, e = login(handshake, l, c, nil)
+	done()
 	return e
 }
 

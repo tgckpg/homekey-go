@@ -287,7 +287,10 @@ func (m *Manager) Add(ctx context.Context, in Enrollment) (Record, error) {
 	if in.Mode != "register" && in.Mode != "import" {
 		return Record{}, errors.New("choose register or import")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Leave room for separate BLE discovery/connect, initial-token and
+	// registration budgets, plus persistence. A slow dial must not exhaust
+	// the handshake deadline before the lock can answer.
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	stop := context.AfterFunc(m.ctx, cancel)
 	defer stop()
